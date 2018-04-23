@@ -11,10 +11,32 @@ def create_lookup_tables(words):
     return vocab_to_int
 
 
+def map_complex_elements(source, map_dic, fill_na='0'):
+    mapped = source.copy()
+    length = len(mapped)
+    step = length // 10
+    for i, e in enumerate(source.fillna(fill_na)):
+        if e.isdigit():
+            mapped[i] = str(map_dic[int(e)])
+        else:
+            elements = list()
+            for ee in e.split('-'):
+                elements.append(str(map_dic[int(ee)]))
+            formed = '-'
+            formed = formed.join(elements)
+            mapped[i] = formed
+        if i % step == 0:
+            sys.stdout.write('progress: ' + str(10 * i // step) + '\r')
+            sys.stdout.flush()
+    sys.stdout.write('progress: 100\n')
+    sys.stdout.flush()
+    return mapped
+
+
 def remove_rare_labels(source, remove_list, fill_na='0'):
     cleaned = source.copy()
     length = len(cleaned)
-    step = length // 100
+    step = length // 10
     for i, e in enumerate(source.fillna(fill_na)):
         if e.isdigit():
             if int(e) in remove_list:
@@ -33,7 +55,7 @@ def remove_rare_labels(source, remove_list, fill_na='0'):
                 formed = formed.join(elements)
                 cleaned[i] = formed
         if i % step == 0:
-            sys.stdout.write('progress: ' + str(i // step) + '\r')
+            sys.stdout.write('progress: ' + str(10 * i // step) + '\r')
             sys.stdout.flush()
     sys.stdout.write('progress: 100\n')
     sys.stdout.flush()
@@ -43,7 +65,7 @@ def remove_rare_labels(source, remove_list, fill_na='0'):
 def count_element(feature_box, fill_na='0'):
     collector = list()
     length = len(feature_box)
-    step = length // 100
+    step = length // 10
     filled_feature = feature_box.fillna(fill_na)
     for i, e in enumerate(feature_box.fillna(fill_na)):
         e = filled_feature[i]
@@ -53,7 +75,7 @@ def count_element(feature_box, fill_na='0'):
             for ee in e.split('-'):
                 collector.append(int(ee))
         if i % step == 0:
-            sys.stdout.write('progress: ' + str(i // step) + '\r')
+            sys.stdout.write('progress: ' + str(10 * i // step) + '\r')
             sys.stdout.flush()
     sys.stdout.write('progress: 100\n')
     sys.stdout.flush()
