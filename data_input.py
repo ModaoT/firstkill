@@ -25,6 +25,7 @@ def main(_):
              advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId, productType,
              age, gender, marriageStatus, education, consumptionAbility, LBS, ct, os, carrier, house), \
              (interest, kw, topic, appId) = create_data_input('data/train_ad_user_all.csv', True, 1)
+            label = tf.cond(tf.equal(label, -1), 0, 1)
             head = tf.concat([aid, uid, label], -1)
         else:
             (aid, uid,
@@ -54,6 +55,33 @@ def main(_):
             print(_user_embedding)
             print(_feature)
             print()
+
+
+def get_data(summary, train=True, batch_size=128):
+    label = 0
+    if train:
+        (aid, uid, label,
+         advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId, productType,
+         age, gender, marriageStatus, education, consumptionAbility, LBS, ct, os, carrier, house), \
+         (interest, kw, topic, appId) = create_data_input('data/train_ad_user_all.csv', True, batch_size)
+    else:
+        (aid, uid,
+         advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId, productType,
+         age, gender, marriageStatus, education, consumptionAbility, LBS, ct, os, carrier, house), \
+         (interest, kw, topic, appId) = create_data_input('data/test_ad_user_all.csv', False, batch_size)
+
+    ad_base = tf.concat([advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId, productType], -1)
+    user_base = tf.concat([age, gender, marriageStatus, education, consumptionAbility, LBS, ct, os, carrier, house], -1)
+    user_embedding = tf.concat([interest, kw, topic, appId], -1)
+
+    feature = tf.concat([ad_base, user_base, user_embedding], axis=-1)
+    label = tf.cond(tf.equal(label, -1), 0, 1)
+
+    summary.append(tf.summary.histogram('ad_base', ad_base))
+    summary.append(tf.summary.histogram('ad_base', user_base))
+    summary.append(tf.summary.histogram('ad_base', user_embedding))
+
+    return feature, label
 
 
 def create_data_input(files, train=True, batch_size=128):
@@ -108,8 +136,7 @@ def read_data(files, train, batch_size):
     def parser(value):
         return tf.decode_csv(value, COLUMN_DEFAULTS)
 
-    dataset = tf.data.TextLineDataset(files).skip(1).map(parser).batch(batch_size)
-        # .shuffle(100000)\
+    dataset = tf.data.TextLineDataset(files).skip(1).map(parser).shuffle(100000).batch(batch_size)
 
     data_input = dataset.make_one_shot_iterator().get_next()
 
