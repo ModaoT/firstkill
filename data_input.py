@@ -20,41 +20,52 @@ def main(_):
     # test_embedding()
     tf.reset_default_graph()
     with tf.get_default_graph().as_default():
+        label = 0
         if TRAIN:
             (aid, uid, label,
              advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId, productType,
              age, gender, marriageStatus, education, consumptionAbility, LBS, ct, os, carrier, house), \
-             (interest, kw, topic, appId) = create_data_input('data/train_ad_user_all.csv', True, 1)
-            label = tf.cond(tf.equal(label, -1), 0, 1)
-            head = tf.concat([aid, uid, label], -1)
+             (interest, kw, topic, appId) = create_data_input('data/train_ad_user_all.csv', True, 5)
         else:
             (aid, uid,
              advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId, productType,
              age, gender, marriageStatus, education, consumptionAbility, LBS, ct, os, carrier, house), \
-             (interest, kw, topic, appId) = create_data_input('data/test_ad_user_all.csv', False, 1)
-            head = tf.concat([aid, uid], -1)
-        ad_base = tf.concat([advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId, productType], -1)
-        user_base = tf.concat([age, gender, marriageStatus, education, consumptionAbility, LBS, ct, os, carrier, house], -1)
-        user_embedding = tf.concat([interest, kw, topic, appId], -1)
+             (interest, kw, topic, appId) = create_data_input('data/test_ad_user_all.csv', False, 5)
 
-        feature = tf.concat([ad_base, user_base, user_embedding], axis=-1)
+        aid = tf.reshape(aid, [-1, 1])
+        uid = tf.reshape(uid, [-1, 1])
+        head = tf.concat([aid, uid], 1)
+        if TRAIN:
+            label = tf.reshape(tf.div(tf.add(label, 1), 2), [-1, 1])
+
+        # ad_base = tf.concat([advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId, productType], 1)
+        # user_base = tf.concat([age, gender, marriageStatus, education, consumptionAbility, LBS, ct, os, carrier, house], 1)
+        # user_embedding = tf.concat([interest, kw, topic, appId], 1)
+
+        # feature = tf.concat([ad_base, user_base, user_embedding])
 
     # just test
     init_op = tf.global_variables_initializer()
     with tf.Session() as sess:
         sess.run(init_op)
-        for i in range(1):
-            _head, _ad_base, _user_base, _user_embedding, _feature = sess.run([head,
-                                                                               ad_base,
-                                                                               user_base,
-                                                                               user_embedding,
-                                                                               feature])
-            print(_head)
-            print(_ad_base)
-            print(_user_base)
-            print(_user_embedding)
-            print(_feature)
-            print()
+        _head, label1, label2 = sess.run([head, label, _label])
+        print(_head)
+        print(label1)
+        print(label2)
+        # print(feature)
+
+        # for i in range(1):
+        #     _head, _ad_base, _user_base, _user_embedding, _feature = sess.run([head,
+        #                                                                        ad_base,
+        #                                                                        user_base,
+        #                                                                        user_embedding,
+        #                                                                        feature])
+        #     print(_head)
+        #     print(_ad_base)
+        #     print(_user_base)
+        #     print(_user_embedding)
+        #     print(_feature)
+        #     print()
 
 
 def get_data(summary, train=True, batch_size=128):
@@ -136,7 +147,9 @@ def read_data(files, train, batch_size):
     def parser(value):
         return tf.decode_csv(value, COLUMN_DEFAULTS)
 
-    dataset = tf.data.TextLineDataset(files).skip(1).map(parser).shuffle(100000).batch(batch_size)
+    dataset = tf.data.TextLineDataset(files).skip(1).map(parser).batch(batch_size).repeat()
+    if train:
+        dataset = dataset.shuffle(100)
 
     data_input = dataset.make_one_shot_iterator().get_next()
 
