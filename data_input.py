@@ -20,38 +20,19 @@ def main(_):
     # test_embedding()
     tf.reset_default_graph()
     with tf.get_default_graph().as_default():
-        label = 0
+        labels = 0
         if TRAIN:
-            (aid, uid, label,
-             advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId, productType,
-             age, gender, marriageStatus, education, consumptionAbility, LBS, ct, os, carrier, house), \
-             (interest, kw, topic, appId) = create_data_input('data/train_ad_user_all.csv', True, 5)
+            head, features = create_data_input('data/train_ad_user_all.csv', [], True, 5)
+            ids, labels = tf.split(head, [2, 1], 1)
         else:
-            (aid, uid,
-             advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId, productType,
-             age, gender, marriageStatus, education, consumptionAbility, LBS, ct, os, carrier, house), \
-             (interest, kw, topic, appId) = create_data_input('data/test_ad_user_all.csv', False, 5)
-
-        aid = tf.reshape(aid, [-1, 1])
-        uid = tf.reshape(uid, [-1, 1])
-        head = tf.concat([aid, uid], 1)
-        if TRAIN:
-            label = tf.reshape(tf.div(tf.add(label, 1), 2), [-1, 1])
-
-        # ad_base = tf.concat([advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId, productType], 1)
-        # user_base = tf.concat([age, gender, marriageStatus, education, consumptionAbility, LBS, ct, os, carrier, house], 1)
-        # user_embedding = tf.concat([interest, kw, topic, appId], 1)
-
-        # feature = tf.concat([ad_base, user_base, user_embedding])
-
+            head, features = create_data_input('data/test_ad_user_all.csv', [], False, 5)
     # just test
     init_op = tf.global_variables_initializer()
     with tf.Session() as sess:
         sess.run(init_op)
-        _head, label1, label2 = sess.run([head, label, _label])
+        _head, label1 = sess.run([head, labels])
         print(_head)
         print(label1)
-        print(label2)
         # print(feature)
 
         # for i in range(1):
@@ -69,40 +50,26 @@ def main(_):
 
 
 def get_data(summary, train=True, batch_size=128):
-    label = 0
+    labels = 0
     if train:
-        (aid, uid, label,
-         advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId, productType,
-         age, gender, marriageStatus, education, consumptionAbility, LBS, ct, os, carrier, house), \
-         (interest, kw, topic, appId) = create_data_input('data/train_ad_user_all.csv', True, batch_size)
+        head, features = create_data_input('data/train_ad_user_all.csv', summary, True, batch_size)
+        ids, labels = tf.split(head, [2, 1], 1)
     else:
-        (aid, uid,
-         advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId, productType,
-         age, gender, marriageStatus, education, consumptionAbility, LBS, ct, os, carrier, house), \
-         (interest, kw, topic, appId) = create_data_input('data/test_ad_user_all.csv', False, batch_size)
+        head, features = create_data_input('data/test_ad_user_all.csv', summary, False, batch_size)
 
-    ad_base = tf.concat([advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId, productType], -1)
-    user_base = tf.concat([age, gender, marriageStatus, education, consumptionAbility, LBS, ct, os, carrier, house], -1)
-    user_embedding = tf.concat([interest, kw, topic, appId], -1)
-
-    feature = tf.concat([ad_base, user_base, user_embedding], axis=-1)
-    label = tf.cond(tf.equal(label, -1), 0, 1)
-
-    summary.append(tf.summary.histogram('ad_base', ad_base))
-    summary.append(tf.summary.histogram('ad_base', user_base))
-    summary.append(tf.summary.histogram('ad_base', user_embedding))
-
-    return feature, label
+    return features, labels
 
 
-def create_data_input(files, train=True, batch_size=128):
+def create_data_input(files, summary, train=True, batch_size=128):
     with tf.name_scope('origin_data'):
-        data_ori = read_data(files, train, batch_size)
+        head, base, interest, kw, topic, appId = read_data(files, train, batch_size)
+        summary.append(tf.summary.histogram('base', base))
 
-    with tf.name_scope('input_embedding'):
-        data_input = complex_data_embedding(data_ori)
 
-    return data_input
+
+    feature = tf.concat([base, embedded], 1)
+
+    return head, feature
 
 
 def create_embedding(inputs, words_unique, out_num, name):
@@ -132,24 +99,44 @@ def test_embedding():
                 print(feature_embedded_sum)
 
 
-def read_data(files, train, batch_size):
-    if train:
-        COLUMN_DEFAULTS = [[0], [0], [0],
-                           [0.], [0.], [0.], [0.], [0.], [0.], [0.],
-                           [0.], [0.], [0.], [0.], [0.], [0.], [0.], [0.], [0.], [0.],
-                           [''], [''], [''], ['']]
-    else:
-        COLUMN_DEFAULTS = [[0], [0],
-                           [0.], [0.], [0.], [0.], [0.], [0.], [0.],
-                           [0.], [0.], [0.], [0.], [0.], [0.], [0.], [0.], [0.], [0.],
-                           [''], [''], [''], ['']]
+def read_data(files, summary, train, batch_size):
 
     def parser(value):
-        return tf.decode_csv(value, COLUMN_DEFAULTS)
+        if train:
+            COLUMN_DEFAULTS = [[0], [0], [0],
+                               [0.], [0.], [0.], [0.], [0.], [0.], [0.],
+                               [0.], [0.], [0.], [0.], [0.], [0.], [0.], [0.], [0.], [0.],
+                               [''], [''], [''], ['']]
+            aid, uid, label, \
+            advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId, productType, \
+            age, gender, marriageStatus, education, consumptionAbility, LBS, ct, os, carrier, house, \
+            interest, kw, topic, appId = tf.decode_csv(value, COLUMN_DEFAULTS)
 
-    dataset = tf.data.TextLineDataset(files).skip(1).map(parser).batch(batch_size).repeat()
+            label = tf.div(tf.add(label, 1), 2)
+            head = tf.stack([aid, uid, label])
+        else:
+            COLUMN_DEFAULTS = [[0], [0],
+                               [0.], [0.], [0.], [0.], [0.], [0.], [0.],
+                               [0.], [0.], [0.], [0.], [0.], [0.], [0.], [0.], [0.], [0.],
+                               [''], [''], [''], ['']]
+            aid, uid, \
+            advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId, productType, \
+            age, gender, marriageStatus, education, consumptionAbility, LBS, ct, os, carrier, house, \
+            interest, kw, topic, appId = tf.decode_csv(value, COLUMN_DEFAULTS)
+            head = tf.stack([aid, uid])
+
+        base = tf.stack([advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId,
+                         productType, age, gender, marriageStatus, education, consumptionAbility,
+                         LBS, ct, os, carrier, house])
+        with tf.name_scope('input_embedding'):
+            embedded = complex_data_embedding([interest, kw, topic, appId])
+            summary.append(tf.summary.histogram('embedded', embedded))
+
+        return head, base, embedded
+
+    dataset = tf.data.TextLineDataset(files).skip(1).map(parser).batch(batch_size)
     if train:
-        dataset = dataset.shuffle(100)
+        dataset = dataset.shuffle(100).repeat()
 
     data_input = dataset.make_one_shot_iterator().get_next()
 
@@ -157,7 +144,7 @@ def read_data(files, train, batch_size):
 
 
 def complex_data_embedding(data_origin):
-    interest, kw, topic, appId = data_origin[-4:]
+    interest, kw, topic, appId = data_origin
     interest = convert(interest)
     kw = convert(kw)
     topic = convert(topic)
@@ -167,11 +154,13 @@ def complex_data_embedding(data_origin):
     topic_embedded = create_embedding(topic, TOPIC_UNIQUE, TOPIC_EMBED, 'topic')
     appId_embedded = create_embedding(appId, APP_ID_UNIQUE, APP_ID_EMBED, 'appId')
 
-    return data_origin[:-4], (interest_embedded, kw_embedded, topic_embedded, appId_embedded)
+    embedded = tf.concat([interest_embedded, kw_embedded, topic_embedded, appId_embedded], 0)
+
+    return embedded
 
 
 def convert(value):
-    splits = tf.string_split([value[-1]], '-')
+    splits = tf.string_split(value, '-')
     dense = tf.sparse_tensor_to_dense(splits, default_value='0')
     return tf.string_to_number(dense, out_type=tf.int32)
 
