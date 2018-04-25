@@ -19,7 +19,7 @@ flags.DEFINE_list('hidden', [128, 256, 56], '设置隐藏层结构')
 flags.DEFINE_float('gammar', 0.3, 'AUC参数')
 flags.DEFINE_integer('power_p', 2, 'AUC参数')
 
-flags.DEFINE_integer('buffer', 10000, '读取数据的缓冲区大小')
+flags.DEFINE_integer('buffer', 5000, '读取数据的缓冲区大小')
 
 cfg = tf.app.flags.FLAGS
 
