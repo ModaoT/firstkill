@@ -41,12 +41,13 @@ def main(_):
 
 
 def get_data(summary, train=True, batch_size=128):
-    labels = 0
-    if train:
-        head, features = create_data_input('data/train_ad_user_all.csv', summary, True, batch_size)
-        ids, labels = tf.split(head, [2, 1], 1)
-    else:
-        head, features = create_data_input('data/test_ad_user_all.csv', summary, False, batch_size)
+    with tf.name_scope('input'):
+        labels = 0
+        if train:
+            head, features = create_data_input('data/train_ad_user_all.csv', summary, True, batch_size)
+            ids, labels = tf.split(head, [2, 1], 1)
+        else:
+            head, features = create_data_input('data/test_ad_user_all.csv', summary, False, batch_size)
 
     return features, labels
 
@@ -68,7 +69,7 @@ def create_data_input(files, summary, train=True, batch_size=128):
         embedded = complex_data_embedding(interest, kw, topic, appId, summary)
         summary.append(tf.summary.histogram('embedded', embedded))
 
-    feature = tf.concat([base, embedded], 1)
+    feature = tf.concat([base, embedded], 1, name='features')
 
     return head, feature
 
