@@ -1,6 +1,7 @@
 import tensorflow as tf
 import pandas as pd
 import os
+from sklearn.metrics import roc_curve, auc
 # 进度条工具
 from tqdm import tqdm
 # 超参配置文件
@@ -32,8 +33,8 @@ def main(_):
         if cfg.train:
             # 直接调用tensorflow的metric.auc计算近似的AUC
             # auc, update_op = tf.metrics.auc(labels, outputs)
-            auc = cal_auc(labels, outputs)
-            summary.append(tf.summary.scalar('train_auc', auc))
+            # auc = cal_auc(labels, outputs)
+            # summary.append(tf.summary.scalar('train_auc', auc))
 
             merged_summary = tf.summary.merge(summary)
             # 构造学习器
@@ -62,10 +63,13 @@ def main(_):
                                unit='b')
                     for _ in bar:
                         if global_step % cfg.summary == 0:
-                            train_loss, _, train_auc, summary_str = sess.run(
-                                [loss, opt, auc, merged_summary])
+                            _labels, train_loss, _, pre, summary_str = sess.run(
+                                [labels, loss, opt, outputs, merged_summary])
                             train_writer.add_summary(summary_str, global_step)
-                            bar.set_description('loss:{:6.4f}, auc:{:6.4f}'.format(train_loss, train_auc))
+                            fpr, tpr, thresholds = roc_curve(_labels, pre, pos_label=1)
+                            _auc = auc(fpr, tpr)
+                            bar.set_description('loss:{:5.3f},auc:{:5.3f}'
+                                                .format(train_loss, _auc))
                         else:
                             sess.run(opt)
 
@@ -132,28 +136,28 @@ def build_loss(labels, logits, summary):
 
 def cal_auc(labels, outputs):
     # 获取正负样本的索引位置
-    labels_temp = labels[:, 0]
-    pos_idx = tf.where(tf.equal(labels_temp, 1))[:, 0]
-    neg_idx = tf.where(tf.equal(labels_temp, 0))[:, 0]
+    with tf.name_scope('auc'):
+        labels_temp = labels[:, 0]
+        pos_idx = tf.where(tf.equal(labels_temp, 1))[:, 0]
+        neg_idx = tf.where(tf.equal(labels_temp, 0))[:, 0]
 
-    # 获取正负样本位置对应的预测值
-    pos_predict = tf.gather(outputs, pos_idx)
-    pos_size = tf.shape(pos_predict)[0]
-    neg_predict = tf.gather(outputs, neg_idx)
-    neg_size = tf.shape(neg_predict)[0]
-    # 按照论文'Optimizing Classifier Performance
-    # via an Approximation to the Wilcoxon-Mann-Whitney Statistic'中的公式(7)计算loss_function
-    pos_neg_diff = tf.reshape(
-        -(tf.matmul(pos_predict, tf.ones([1, neg_size])) -
-          tf.matmul(tf.ones([pos_size, 1]), tf.reshape(neg_predict, [1, neg_size])) - cfg.gammar),
-        [-1, 1]
-    )
-    pos_neg_diff = tf.where(tf.greater(pos_neg_diff, 0), pos_neg_diff, tf.zeros([pos_size * neg_size, 1]))
-    pos_neg_diff = tf.pow(pos_neg_diff, cfg.power_p)
+        # 获取正负样本位置对应的预测值
+        pos_predict = tf.gather(outputs, pos_idx)
+        pos_size = tf.shape(pos_predict)[0]
+        neg_predict = tf.gather(outputs, neg_idx)
+        neg_size = tf.shape(neg_predict)[0]
+        # 按照论文'Optimizing Classifier Performance
+        # via an Approximation to the Wilcoxon-Mann-Whitney Statistic'中的公式(7)计算loss_function
+        pos_neg_diff = tf.reshape(
+            -(tf.matmul(pos_predict, tf.ones([1, neg_size])) -
+              tf.matmul(tf.ones([pos_size, 1]), tf.reshape(neg_predict, [1, neg_size])) - cfg.gammar),
+            [-1, 1]
+        )
+        pos_neg_diff = tf.where(tf.greater(pos_neg_diff, 0), pos_neg_diff, tf.zeros([pos_size * neg_size, 1]))
+        pos_neg_diff = tf.pow(pos_neg_diff, cfg.power_p)
 
-    loss_approx_auc = tf.reduce_mean(pos_neg_diff)
+        loss_approx_auc = tf.reduce_mean(pos_neg_diff)
     return loss_approx_auc
-
 
 
 # 获取上一次保存的模型
