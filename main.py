@@ -84,7 +84,7 @@ def main(_):
                 train_writer.close()
 
         else:
-            result = list()
+            result = np.array([])
 
             init_op = tf.group([tf.global_variables_initializer(), tf.local_variables_initializer()])
             saver = tf.train.Saver()
@@ -98,7 +98,7 @@ def main(_):
                            unit='b')
                 for _ in bar:
                     _outputs = sess.run([outputs])
-                    result += _outputs
+                    result = np.append(result, _outputs)
 
                 bar.close()
             print('scores length: ', len(result))  # 2265989
