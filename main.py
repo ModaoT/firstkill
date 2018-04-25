@@ -43,7 +43,7 @@ def main(_):
             opt = tf.train.AdamOptimizer(cfg.lr).minimize(loss)
 
             init_op = tf.group([tf.global_variables_initializer(), tf.local_variables_initializer()])
-            saver = tf.train.Saver()
+            saver = tf.train.Saver(max_to_keep=10)
             with tf.Session() as sess:
                 sess.run(init_op)
 
