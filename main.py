@@ -1,5 +1,6 @@
 import tensorflow as tf
 import pandas as pd
+import numpy as np
 import os
 from sklearn.metrics import roc_curve, auc
 # 进度条工具
@@ -27,10 +28,11 @@ def main(_):
         features, labels = data_input.get_data(summary, cfg.train, cfg.batch)
         # 构造网络结构
         logits, outputs = build_arch(features, cfg.hidden, summary, cfg.train)
-        # 构造损失函数
-        loss = build_loss(labels, logits, summary)
 
         if cfg.train:
+            # 构造损失函数
+            loss = build_loss(labels, logits, summary)
+
             # 直接调用tensorflow的metric.auc计算近似的AUC
             # auc, update_op = tf.metrics.auc(labels, outputs)
             # auc = cal_auc(labels, outputs)
@@ -82,26 +84,30 @@ def main(_):
                 train_writer.close()
 
         else:
-            result = pd.Series([])
+            result = list()
 
             init_op = tf.group([tf.global_variables_initializer(), tf.local_variables_initializer()])
             saver = tf.train.Saver()
             with tf.Session() as sess:
                 sess.run(init_op)
 
+                print('load model: ', ckpt.model_checkpoint_path)
                 saver.restore(sess, ckpt.model_checkpoint_path)
 
                 bar = tqdm(range(0, test_batch), total=test_batch, ncols=100, leave=False,
                            unit='b')
                 for _ in bar:
-                    outputs = sess.run([outputs])
-                    result.append(outputs)
+                    _outputs = sess.run([outputs])
+                    result.append(_outputs)
 
                 bar.close()
-
+            print('scores length: ', len(result))  # 2265989
+            print('reading test_ad_user_all.csv ...')
             test_data = pd.read_csv('data/test_ad_user_all.csv')
-            test_data['score'] = result
+            test_data['score'] = np.array(result)
+            print('writing results into submission.csv ...')
             test_data[['aid', 'uid', 'score']].to_csv('data/submission.csv', columns=['aid', 'uid', 'score'], index=False)
+            print('finish')
 
 
 def train():
