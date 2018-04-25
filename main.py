@@ -1,4 +1,5 @@
 import tensorflow as tf
+import pandas as pd
 import os
 # 进度条工具
 from tqdm import tqdm
@@ -8,92 +9,105 @@ from config import cfg
 import data_input
 
 
+TRAIN_NUM = 8798814
+TEST_NUM = 2265989
+
+
 def main(_):
     tf.reset_default_graph()
     graph = tf.Graph()
     summary = []
     with graph.as_default():
         # 从文件流读取数据
-        feature, label = data_input.get_data(cfg.training, cfg.batch, summary)
+        features, labels = data_input.get_data(summary, cfg.train, cfg.batch)
         # 构造网络结构
-        logits, outputs = build_arch(feature, cfg.hidden, summary)
+        logits, outputs = build_arch(features, cfg.hidden, summary)
+        # 构造损失函数
+        loss = build_loss(labels, logits, summary)
+        # 获取上一次保存的状态
+        train_batch = TRAIN_NUM // cfg.batch  # 训练集大小//batch大小
+        test_batch = TEST_NUM // cfg.batch  # 测试集大小//batch大小
+        ckpt, global_step, last_epoch, last_step = get_last_state(cfg.logdir, train_batch)
 
-        if cfg.training:
-            tf.logging.info(' Start training...')
-            train(model)
-            tf.logging.info('Training done')
+        if cfg.train:
+            # 直接调用tensorflow的metric.auc计算近似的AUC
+            auc, update_op = tf.metrics.auc(labels, outputs)
+            summary.append(tf.summary.scalar('train_auc', auc))
+
+            merged_summary = tf.summary.merge(summary)
+            # 构造学习器
+            opt = tf.train.AdamOptimizer(cfg.lr).minimize(loss)
+
+            init_op = tf.group([tf.global_variables_initializer(), tf.local_variables_initializer()])
+            saver = tf.train.Saver()
+            with tf.Session() as sess:
+                sess.run(init_op)
+
+                train_writer = tf.summary.FileWriter(cfg.logdir + '/train', sess.graph)
+
+                if ckpt and ckpt.model_checkpoint_path:
+                    # 加载上次保存的模型
+                    saver.restore(sess, ckpt.model_checkpoint_path)
+                # 计算图结构分析
+                param_stats = tf.contrib.tfprof.model_analyzer.print_model_analysis(
+                    tf.get_default_graph(),
+                    tfprof_options=tf.contrib.tfprof.model_analyzer.TRAINABLE_VARS_PARAMS_STAT_OPTIONS)
+                print('total_params: %d\n' % param_stats.total_parameters)
+
+                for e in range(last_epoch, cfg.epoch):
+                    print('Training for epoch ' + str(e + 1) + '/' + str(cfg.epoch) + ':')
+
+                    bar = tqdm(range(last_step, train_batch), initial=last_step, total=train_batch, ncols=100, leave=False,
+                               unit='b')
+                    for _ in bar:
+                        if global_step % cfg.summary == 0:
+                            # train
+                            # _, train_score, summary_str = sess.run(
+                            #        [opt, score, summary])
+                            train_loss, _, train_auc, summary_str = sess.run(
+                                [loss, opt, auc, merged_summary])
+                            train_writer.add_summary(summary_str, global_step)
+                            bar.set_description('loss:{}, auc:{}'.format(train_loss, train_auc))
+                        else:
+                            sess.run(opt)
+
+                        global_step += 1
+                        if global_step % cfg.checkpoint == 0:
+                            saver.save(sess, cfg.logdir + '/model.ckpt', global_step=global_step)
+
+                    bar.close()
+
+                train_writer.close()
+
         else:
-            evaluation(model)
+            result = pd.Series([])
+
+            init_op = tf.group([tf.global_variables_initializer(), tf.local_variables_initializer()])
+            saver = tf.train.Saver()
+            with tf.Session() as sess:
+                sess.run(init_op)
+
+                saver.restore(sess, ckpt.model_checkpoint_path)
+
+                bar = tqdm(range(0, test_batch), total=test_batch, ncols=100, leave=False,
+                           unit='b')
+                for _ in bar:
+                    outputs = sess.run([outputs])
+                    result.append(outputs)
+
+                bar.close()
+
+            test_data = pd.read_csv('data/test_ad_user_all.csv')
+            test_data['score'] = result
+            test_data[['aid', 'uid', 'score']].to_csv('data/submission.csv', columns=['aid', 'uid', 'score'], index=False)
 
 
 def train():
-    tf.reset_default_graph()
-    X_train, y_train = read_data('data/train_user_ad_base.csv', batch_size=batch_size, num_epochs=epoch)
-    print(X_train.shape)
-    print(y_train.shape)
-    outputs = build_arch(X_train)
-    # loss = choose_loss(outputs, y_train, gammar, power_p)
-    loss = build_cross_entropy_loss(outputs, y_train)
-    score = tf.reduce_mean(loss)  # build_score(outputs, y_train)
-    # 直接调用tensorflow的metric.auc计算近似的AUC
-    corss_score, corss_val_opt = tf.metrics.auc(y_train, (outputs))
-    opt = tf.train.AdamOptimizer(lr).minimize(loss)
-
-    # ### 训练
-
-    # In[ ]:
-
-    num_batch = 100000 // batch_size  # 训练集大小//batch大小
-    ckpt, global_step, last_epoch, last_step = get_last_state(logdir, num_batch)
-    init_op = tf.global_variables_initializer()
-
-    saver = tf.train.Saver()
-    with tf.Session() as sess:
-        sess.run(init_op)
-        tf.local_variables_initializer().run()  # 对loacl变量初始化后，文件读取不会报错
-        tf.train.start_queue_runners(sess=sess)  # train的文件队列开始填充
-        train_writer = tf.summary.FileWriter(logdir + '/train', sess.graph)
-
-        if ckpt and ckpt.model_checkpoint_path:
-            # 加载上次保存的模型
-            saver.restore(sess, ckpt.model_checkpoint_path)
-        # 计算图结构分析
-        param_stats = tf.contrib.tfprof.model_analyzer.print_model_analysis(
-            tf.get_default_graph(),
-            tfprof_options=tf.contrib.tfprof.model_analyzer.TRAINABLE_VARS_PARAMS_STAT_OPTIONS)
-        print('total_params: %d\n' % param_stats.total_parameters)
-
-        for e in range(last_epoch, epoch):
-            print('Training for epoch ' + str(e + 1) + '/' + str(epoch) + ':')
-
-            bar = tqdm(range(last_step, num_batch), initial=last_step, total=num_batch, ncols=100, leave=False,
-                       unit='b')
-            for _ in bar:
-                if global_step % save_summaries_steps == 0:
-                    # train
-                    # _, train_score, summary_str = sess.run(
-                    #        [opt, score, summary])
-                    _, train_score = sess.run(
-                        [opt, score])
-                    # train_writer.add_summary(summary_str, global_step)
-                    bar.set_description('tr_acc:{}'.format(train_score))
-
-                    # 交叉验证：从训练集中读出batch_size大小的数据，进行交叉验证
-                    validation_score, _ = sess.run(
-                        [corss_score, corss_val_opt])
-                    print('cross_validation_score:', validation_score, '\t')
-                else:
-                    sess.run(opt)
-
-                global_step += 1
-                if global_step % save_checkpoint_steps == 0:
-                    saver.save(sess, logdir + '/model.ckpt', global_step=global_step)
-
-        train_writer.close()
-        print('Starting prediction')
+    pass
 
 
 def evaluate():
+    pass
 
 
 def build_arch(inputs, hide_layer, summary):
@@ -111,7 +125,7 @@ def build_arch(inputs, hide_layer, summary):
 
 
 def build_loss(labels, logits, summary):
-    loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels, logits))
+    loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.cast(labels, tf.float32), logits=logits))
     summary.append(tf.summary.scalar('loss', loss))
     return loss
 
