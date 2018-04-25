@@ -98,7 +98,7 @@ def main(_):
                            unit='b')
                 for _ in bar:
                     _outputs = sess.run([outputs])
-                    result.append(_outputs)
+                    result += _outputs
 
                 bar.close()
             print('scores length: ', len(result))  # 2265989
