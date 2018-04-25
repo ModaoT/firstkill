@@ -94,7 +94,7 @@ def main(_):
                 print('load model: ', ckpt.model_checkpoint_path)
                 saver.restore(sess, ckpt.model_checkpoint_path)
 
-                bar = tqdm(range(0, test_batch), total=test_batch, ncols=100, leave=False,
+                bar = tqdm(range(0, test_batch+1), total=test_batch, ncols=100, leave=False,
                            unit='b')
                 for _ in bar:
                     _outputs = sess.run([outputs])
