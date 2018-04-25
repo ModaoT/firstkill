@@ -78,7 +78,7 @@ def main(_):
                         global_step += 1
                         if global_step % cfg.checkpoint == 0:
                             saver.save(sess, cfg.logdir + '/model.ckpt', global_step=global_step)
-
+                    last_step = 0
                     bar.close()
 
                 train_writer.close()
