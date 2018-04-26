@@ -7,7 +7,7 @@ flags = tf.app.flags
 #    hyper parameters      #
 ############################
 
-flags.DEFINE_float('lr', 0.1, '设置学习率')
+flags.DEFINE_float('lr', 0.001, '设置学习率')
 flags.DEFINE_integer('batch', 1024, '设置批大小')
 flags.DEFINE_integer('epoch', 5, '设置训练的轮数')
 flags.DEFINE_integer('checkpoint', 1000, '每隔多少个批次保存一次模型')
@@ -19,7 +19,7 @@ flags.DEFINE_list('hidden', [128, 256, 56], '设置隐藏层结构')
 flags.DEFINE_float('gammar', 0.3, 'AUC参数')
 flags.DEFINE_integer('power_p', 2, 'AUC参数')
 
-flags.DEFINE_integer('buffer', 5000, '读取数据的缓冲区大小')
+flags.DEFINE_integer('buffer', 2000, '读取数据的缓冲区大小')
 
 cfg = tf.app.flags.FLAGS
 

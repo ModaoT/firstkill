@@ -51,6 +51,7 @@ def main(_):
 
                 if ckpt and ckpt.model_checkpoint_path:
                     # 加载上次保存的模型
+                    print('load model: ', ckpt.model_checkpoint_path)
                     saver.restore(sess, ckpt.model_checkpoint_path)
                 # 计算图结构分析
                 param_stats = tf.contrib.tfprof.model_analyzer.print_model_analysis(
@@ -84,7 +85,7 @@ def main(_):
                 train_writer.close()
 
         else:
-            result = np.array([])
+            result = np.array([], dtype=np.float32)
 
             init_op = tf.group([tf.global_variables_initializer(), tf.local_variables_initializer()])
             saver = tf.train.Saver()
@@ -96,9 +97,11 @@ def main(_):
 
                 bar = tqdm(range(0, test_batch+1), total=test_batch, ncols=100, leave=False,
                            unit='b')
-                for _ in bar:
-                    _outputs = sess.run([outputs])
+                for i in bar:
+                    _logits, _outputs = sess.run([logits, outputs])
                     result = np.append(result, _outputs)
+                    if i % 500 == 0:
+                        print(_logits[0], _outputs[0])
 
                 bar.close()
             print('scores length: ', len(result))  # 2265989
@@ -106,7 +109,7 @@ def main(_):
             test_data = pd.read_csv('data/test_ad_user_all.csv')
             test_data['score'] = np.array(result)
             print('writing results into submission.csv ...')
-            test_data[['aid', 'uid', 'score']].to_csv('data/submission.csv', columns=['aid', 'uid', 'score'], index=False)
+            test_data[['aid', 'uid', 'score']].to_csv('results/submission.csv', columns=['aid', 'uid', 'score'], index=False)
             print('finish')
 
 
@@ -123,7 +126,7 @@ def build_arch(inputs, hide_layer, summary, is_training):
         layer = inputs
         for i, num in enumerate(hide_layer):
             layer = tf.layers.dense(layer, num, activation=None, use_bias=True, name='layer' + str(i+1))
-            layer = tf.layers.batch_normalization(layer, training=is_training, name='bn_layer' + str(i+1))
+            layer = tf.layers.batch_normalization(layer, training=True, name='bn_layer' + str(i+1))
             layer = tf.nn.relu(layer, name='act_layer' + str(i+1))
             summary.append(tf.summary.histogram('layer' + str(i+1), layer))
 
