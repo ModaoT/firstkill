@@ -4,16 +4,16 @@ import numpy as np
 from config import cfg
 
 INTEREST_UNIQUE = 637
-INTEREST_EMBED = 5
+INTEREST_EMBED = cfg.embed[0]
 
 KW_UNIQUE = 16656
-KW_EMBED = 10
+KW_EMBED = cfg.embed[1]
 
 TOPIC_UNIQUE = 30001
-TOPIC_EMBED = 10
+TOPIC_EMBED = cfg.embed[2]
 
 APP_ID_UNIQUE = 15374
-APP_ID_EMBED = 10
+APP_ID_EMBED = cfg.embed[3]
 
 TRAIN = True
 
