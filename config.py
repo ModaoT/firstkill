@@ -7,7 +7,8 @@ flags = tf.app.flags
 #    hyper parameters      #
 ############################
 
-flags.DEFINE_float('lr', 0.001, '设置学习率')
+flags.DEFINE_float('lr', 0.01, '设置学习率')
+flags.DEFINE_float('drop_out', 0.5, 'drop out比率')
 flags.DEFINE_integer('batch', 1024, '设置批大小')
 flags.DEFINE_integer('epoch', 5, '设置训练的轮数')
 flags.DEFINE_integer('checkpoint', 1000, '每隔多少个批次保存一次模型')

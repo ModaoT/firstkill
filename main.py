@@ -43,7 +43,7 @@ def main(_):
             opt = tf.train.AdamOptimizer(cfg.lr).minimize(loss)
 
             init_op = tf.group([tf.global_variables_initializer(), tf.local_variables_initializer()])
-            saver = tf.train.Saver(max_to_keep=10)
+            saver = tf.train.Saver(max_to_keep=5)
             with tf.Session() as sess:
                 sess.run(init_op)
 
@@ -128,6 +128,7 @@ def build_arch(inputs, hide_layer, summary, is_training):
             layer = tf.layers.dense(layer, num, activation=None, use_bias=True, name='layer' + str(i+1))
             layer = tf.layers.batch_normalization(layer, training=True, name='bn_layer' + str(i+1))
             layer = tf.nn.relu(layer, name='act_layer' + str(i+1))
+            layer = tf.layers.dropout(layer, cfg.drop_out, is_training)
             summary.append(tf.summary.histogram('layer' + str(i+1), layer))
 
         logits = tf.layers.dense(layer, 1, activation=None, use_bias=True, name='logits')  # logits是用于损失函数的输入，无需activation

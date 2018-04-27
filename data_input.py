@@ -44,7 +44,7 @@ def get_data(summary, train=True, batch_size=128):
     with tf.name_scope('input'):
         labels = 0
         if train:
-            head, features = create_data_input('data/train_ad_user_all.csv', summary, True, batch_size)
+            head, features = create_data_input('data/train_ad_user_all_shuffle.csv', summary, True, batch_size)
             ids, labels = tf.split(head, [2, 1], 1)
         else:
             head, features = create_data_input('data/test_ad_user_all.csv', summary, False, batch_size)
@@ -141,7 +141,8 @@ def read_data(files, train, batch_size):
 
     dataset = tf.data.TextLineDataset(files).skip(1).map(parser).batch(batch_size)
     if train:
-        dataset = dataset.shuffle(cfg.buffer).repeat()
+        # dataset = dataset.shuffle(cfg.buffer).repeat()
+        dataset = dataset.repeat()
 
     data_input = dataset.make_one_shot_iterator().get_next()
 
