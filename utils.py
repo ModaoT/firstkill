@@ -1,5 +1,8 @@
 from collections import Counter
+from sklearn.metrics import roc_curve, auc
 
+import pandas as pd
+import numpy as np
 import sys
 
 
@@ -156,4 +159,64 @@ def merge_feature(source, feature1, feature2):
     return merged.drop(feature2, axis=1).rename(columns={feature1: feature1+feature2})
 
 
+def cal_pos_rate(data_set):
+    train_pos = data_set[data_set['label'] == 1]
+    train_neg = data_set[data_set['label'] == -1]
+    total_len = len(data_set)
+    print('pos:', len(train_pos) / total_len)
+    print('neg:', len(train_neg) / total_len)
 
+
+def cal_estimated_pos_rate(data_set, threshold=0.5):
+    estimated_pos = data_set[data_set['score'] >= threshold]
+    pos = data_set[data_set['label'] == 1]
+    total_len = len(data_set)
+    return len(estimated_pos) / total_len, len(pos) / total_len
+
+
+def get_pos_rate_by_aid(data_set, ads):
+    pos_rates = list()
+    for aid in ads:
+        collect = data_set[data_set['aid'] == aid]
+        pos_rates.append(len(collect[collect['label'] == 1]) / len(collect))
+    return pos_rates
+
+
+def cal_auc(labels, predict, pos_label=1):
+    fpr, tpr, thresholds = roc_curve(labels, predict, pos_label=pos_label)
+    return auc(fpr, tpr)
+
+
+def cal_auc_by_aid_per_batch(aids, labels, pres):
+    scores = list()
+    aids = np.squeeze(aids)
+    labels = np.squeeze(labels)
+    pres = np.squeeze(pres)
+    df = pd.DataFrame({'aid': aids, 'labels': labels, 'pres': pres})
+    aid_types = df['aid'].drop_duplicates()
+    for aid in aid_types:
+        l = np.array(df[df['aid'] == aid]['labels'])
+        p = np.array(df[df['aid'] == aid]['pres'])
+        if 1 in l and 0 in l:
+            scores.append(cal_auc(l, p, 1))
+    if len(scores) == 0:
+        return 0
+    else:
+        return np.mean(scores)
+
+
+def cal_auc_by_aid(data_set, log=True):
+    aids = data_set['aid'].drop_duplicates()
+    auc_list = list()
+    for aid in aids:
+        group = data_set[data_set['aid'] == aid]
+        labels = group['label']
+        scores = group['score']
+        _auc = cal_auc(labels, scores)
+        if log:
+            estimated_pos_rate, pos_rate = cal_estimated_pos_rate(group)
+            print('aid:{}, estimated_pos_rate:{:5.3f}, pos_rate:{:5.3f}, auc:{:5.3f}'
+                  .format(aid, estimated_pos_rate, pos_rate, _auc))
+        auc_list.append(_auc)
+
+    print('auc of {} aids:{}'.format(len(aids), np.mean(auc_list)))

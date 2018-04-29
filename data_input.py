@@ -40,21 +40,49 @@ def main(_):
         print(features)
 
 
-def get_data(summary, train=True, batch_size=128):
+def get_data(summary, handle, train=True, batch_size=128, submission=True):
     with tf.name_scope('input'):
         labels = 0
+        training_iter, validation_iter = None, None
         if train:
-            head, features = create_data_input('data/train_ad_user_all_shuffle.csv', summary, True, batch_size)
-            ids, labels = tf.split(head, [2, 1], 1)
+            head, base, interest, kw, topic, appId, training_iter, validation_iter = \
+                create_train_data_input(summary, handle, batch_size=batch_size, repeat=True)
+            aid, uid, labels = tf.split(head, [1, 1, 1], 1)
         else:
-            head, features = create_data_input('data/test_ad_user_all.csv', summary, False, batch_size)
+            if submission:
+                head, base, interest, kw, topic, appId = create_test_data_input('data/test_ad_user_all.csv',
+                                                                                False, batch_size)
+                aid, uid = tf.split(head, [1, 1], 1)
+            else:
+                head, base, interest, kw, topic, appId = create_test_data_input('data/train_valid.csv',
+                                                                                True, batch_size)
+                aid, uid, labels = tf.split(head, [1, 1, 1], 1)
 
-    return features, labels
+
+        with tf.name_scope('input_embedding'):
+            embedded = complex_data_embedding(interest, kw, topic, appId, summary)
+            summary.append(tf.summary.histogram('embedded', embedded))
+
+        features = tf.concat([base, embedded], 1, name='features')
+
+    return aid, uid, features, labels, training_iter, validation_iter
 
 
-def create_data_input(files, summary, train=True, batch_size=128):
+def create_train_data_input(summary, handle, batch_size=128, repeat=True, valid=True):
     with tf.name_scope('origin_data'):
-        head, base, interest, kw, topic, appId = read_data(files, train, batch_size)
+        training_iter, validation_iter = None, None
+        if valid:
+            tr_dataset = read_data('data/train_train.csv', True, batch_size, repeat=repeat)
+            val_dataset = read_data('data/train_valid.csv', True, batch_size, repeat=repeat)
+            iterator = tf.data.Iterator.from_string_handle(handle, tr_dataset.output_types, tr_dataset.output_shapes)
+            head, base, interest, kw, topic, appId = iterator.get_next()
+
+            training_iter = tr_dataset.make_one_shot_iterator()
+            validation_iter = val_dataset.make_one_shot_iterator()
+        else:
+            tr_dataset = read_data('data/train_ad_user_all_shuffle.csv', True, batch_size, repeat=repeat)
+            head, base, interest, kw, topic, appId = tr_dataset.make_one_shot_iterator().get_next()
+
         interest = convert(interest)
         kw = convert(kw)
         topic = convert(topic)
@@ -65,13 +93,20 @@ def create_data_input(files, summary, train=True, batch_size=128):
         summary.append(tf.summary.histogram('topic_input', topic))
         summary.append(tf.summary.histogram('appId_input', appId))
 
-    with tf.name_scope('input_embedding'):
-        embedded = complex_data_embedding(interest, kw, topic, appId, summary)
-        summary.append(tf.summary.histogram('embedded', embedded))
+    return head, base, interest, kw, topic, appId, training_iter, validation_iter
 
-    feature = tf.concat([base, embedded], 1, name='features')
 
-    return head, feature
+def create_test_data_input(files, valid, batch_size=128):
+    with tf.name_scope('origin_data'):
+        dataset = read_data(files, valid, batch_size, repeat=False)
+
+        head, base, interest, kw, topic, appId = dataset.make_one_shot_iterator().get_next()
+        interest = convert(interest)
+        kw = convert(kw)
+        topic = convert(topic)
+        appId = convert(appId)
+
+    return head, base, interest, kw, topic, appId
 
 
 def create_embedding(inputs, words_unique, out_num, name, summary, remove='first'):
@@ -107,7 +142,7 @@ def test_embedding():
                 print(feature_embedded_sum)
 
 
-def read_data(files, train, batch_size):
+def read_data(files, train, batch_size, repeat):
 
     def parser(value):
         if train:
@@ -128,9 +163,9 @@ def read_data(files, train, batch_size):
                                [0.], [0.], [0.], [0.], [0.], [0.], [0.], [0.], [0.], [0.],
                                [''], [''], [''], ['']]
             aid, uid, \
-                advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId, productType, \
-                age, gender, marriageStatus, education, consumptionAbility, LBS, ct, os, carrier, house, \
-                interest, kw, topic, appId = tf.decode_csv(value, COLUMN_DEFAULTS)
+            advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId, productType, \
+            age, gender, marriageStatus, education, consumptionAbility, LBS, ct, os, carrier, house, \
+            interest, kw, topic, appId = tf.decode_csv(value, COLUMN_DEFAULTS)
             head = tf.stack([aid, uid])
 
         base = tf.stack([advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId,
@@ -139,14 +174,9 @@ def read_data(files, train, batch_size):
 
         return head, base, interest, kw, topic, appId
 
-    dataset = tf.data.TextLineDataset(files).skip(1).map(parser).batch(batch_size)
-    if train:
-        # dataset = dataset.shuffle(cfg.buffer).repeat()
-        dataset = dataset.repeat()
+    dataset = tf.data.TextLineDataset(files).skip(1).map(parser).batch(batch_size).repeat(count=-1 if repeat else 1)
 
-    data_input = dataset.make_one_shot_iterator().get_next()
-
-    return data_input
+    return dataset
 
 
 def complex_data_embedding(interest, kw, topic, appId, summary):
