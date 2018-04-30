@@ -40,23 +40,23 @@ def main(_):
         print(features)
 
 
-def get_data(summary, handle, train=True, batch_size=128, submission=True):
+def get_data(summary, handle, train=True, valid=True, batch_size=128):
     with tf.name_scope('input'):
         labels = 0
         training_iter, validation_iter = None, None
         if train:
             head, base, interest, kw, topic, appId, training_iter, validation_iter = \
-                create_train_data_input(summary, handle, batch_size=batch_size, repeat=True)
+                create_train_data_input(summary, handle, batch_size=batch_size, repeat=True, valid=valid)
             aid, uid, labels = tf.split(head, [1, 1, 1], 1)
         else:
-            if submission:
-                head, base, interest, kw, topic, appId = create_test_data_input('data/test_ad_user_all.csv',
-                                                                                False, batch_size)
-                aid, uid = tf.split(head, [1, 1], 1)
-            else:
+            if valid:
                 head, base, interest, kw, topic, appId = create_test_data_input('data/train_valid.csv',
                                                                                 True, batch_size)
                 aid, uid, labels = tf.split(head, [1, 1, 1], 1)
+            else:
+                head, base, interest, kw, topic, appId = create_test_data_input('data/test_ad_user_all.csv',
+                                                                                False, batch_size)
+                aid, uid = tf.split(head, [1, 1], 1)
 
 
         with tf.name_scope('input_embedding'):

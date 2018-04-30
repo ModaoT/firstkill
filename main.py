@@ -42,7 +42,8 @@ def train(graph):
     with graph.as_default():
         # 从文件流读取数据
         handle = tf.placeholder(tf.string, shape=[])
-        aid, uid, features, labels, training_iter, validation_iter = data_input.get_data(summary, handle, True, cfg.batch)
+        aid, uid, features, labels, training_iter, validation_iter = data_input.get_data(
+            summary, handle, True, cfg.valid, cfg.batch)
         # 构造网络结构
         is_train = tf.placeholder(dtype=tf.bool)
         logits, outputs = build_arch(features, cfg.hidden, summary, is_train)
@@ -78,11 +79,9 @@ def train(graph):
                     tfprof_options=tf.contrib.tfprof.model_analyzer.TRAINABLE_VARS_PARAMS_STAT_OPTIONS)
                 print('total_params: %d\n' % param_stats.total_parameters)
 
-                tr_feed = {is_train: True}
-                tr_sum_feed = {is_train: False}
+                tr_feed = {is_train: True, handle: training_handle if cfg.valid else ''}
+                tr_sum_feed = {is_train: False, handle: training_handle if cfg.valid else ''}
                 if cfg.valid:
-                    tr_feed[handle] = training_handle
-                    tr_sum_feed[handle] = training_handle
                     val_sum_feed = {is_train: False, handle: validation_handle}
 
                 for e in range(last_epoch, cfg.epoch):
@@ -163,14 +162,14 @@ def evaluate(graph):
             batch_num = TRAIN_VALID_NUM // cfg.batch
             ckpt, _, _, _ = get_last_state(cfg.logdir, batch_num)
             # 从文件流读取数据
-            aid, uid, features, labels, _, _ = data_input.get_data([], None, False, cfg.batch, submission=False)
+            aid, uid, features, labels, _, _ = data_input.get_data([], None, False, True, cfg.batch)
 
         else:  # 使用测试集生成submission
             # 获取上一次保存的状态
             batch_num = TEST_NUM // cfg.batch  # 测试集大小//batch大小
             ckpt, _, _, _ = get_last_state(cfg.logdir, batch_num)
             # 从文件流读取数据
-            aid, uid, features, labels, _, _ = data_input.get_data([], None, False, cfg.batch, submission=True)
+            aid, uid, features, labels, _, _ = data_input.get_data([], None, False, False, cfg.batch)
 
         if ckpt is None or batch_num == 0:
             print('No ckpt found!')
