@@ -1,15 +1,15 @@
-import tensorflow as tf
-import pandas as pd
-import numpy as np
 import os
-import utils
+
+import numpy as np
+import pandas as pd
+import tensorflow as tf
 # 进度条工具
 from tqdm import tqdm
-# 超参配置文件
-from config import cfg
 
 import data_input
-
+import utils
+# 超参配置文件
+from config import cfg
 
 TRAIN_NUM = 8798814
 TRAIN_TRAIN_NUM = 7039051
@@ -43,7 +43,7 @@ def train(graph):
         # 从文件流读取数据
         handle = tf.placeholder(tf.string, shape=[])
         aid, uid, features, labels, training_iter, validation_iter = data_input.get_data(
-            summary, handle, True, cfg.valid, cfg.batch)
+            summary, handle, True, cfg.valid, cfg.batch, cfg.version)
         # 构造网络结构
         is_train = tf.placeholder(dtype=tf.bool)
         logits, outputs = build_arch(features, cfg.hidden, summary, is_train)
@@ -162,14 +162,14 @@ def evaluate(graph):
             batch_num = TRAIN_VALID_NUM // cfg.batch
             ckpt, _, _, _ = get_last_state(cfg.logdir, batch_num)
             # 从文件流读取数据
-            aid, uid, features, labels, _, _ = data_input.get_data([], None, False, True, cfg.batch)
+            aid, uid, features, labels, _, _ = data_input.get_data([], None, False, True, cfg.batch, cfg.version)
 
         else:  # 使用测试集生成submission
             # 获取上一次保存的状态
             batch_num = TEST_NUM // cfg.batch  # 测试集大小//batch大小
             ckpt, _, _, _ = get_last_state(cfg.logdir, batch_num)
             # 从文件流读取数据
-            aid, uid, features, labels, _, _ = data_input.get_data([], None, False, False, cfg.batch)
+            aid, uid, features, labels, _, _ = data_input.get_data([], None, False, False, cfg.batch, cfg.version)
 
         if ckpt is None or batch_num == 0:
             print('No ckpt found!')
@@ -200,7 +200,7 @@ def evaluate(graph):
             print('scores length: ', len(result))  # 2265989
             if cfg.valid:
                 print('reading train_valid.csv ...')
-                valid_data = pd.read_csv('data/train_valid.csv')
+                valid_data = pd.read_csv('data/train_valid_v3.csv')
                 valid_data['score'] = np.array(result)
                 print('computing auc ...')
                 utils.cal_auc_by_aid(valid_data[['aid', 'uid', 'label', 'score']])
@@ -247,11 +247,69 @@ def build_arch(inputs, hide_layer, summary, is_training):
     return logits, outputs
 
 
-def build_loss(labels, logits, summary):
-    loss = tf.reduce_mean(tf.nn.weighted_cross_entropy_with_logits(
-        tf.cast(labels, tf.float32), logits, pos_weight=cfg.pos_weight), name='loss')
+def build_loss(labels, logits, summary, f=''):
+    if f == 'mse':
+        loss = tf.reduce_mean(tf.square(tf.cast(labels, tf.float32) - logits), name='loss')
+    else:
+        loss = tf.reduce_mean(tf.nn.weighted_cross_entropy_with_logits(
+            tf.cast(labels, tf.float32), logits, pos_weight=cfg.pos_weight), name='loss')
     summary.append(tf.summary.scalar('loss', loss))
     return loss
+
+
+# batch中包含正负两类样本时，使用AUC_loss，否则使用最大似然交叉熵
+# def build_loss(labels, logits, predicts, summary, gammar=cfg.gammar, power_p=cfg.power_p):
+#     # 设计损失函数
+#     def cross_entropy():
+#         loss = tf.reduce_mean(tf.nn.weighted_cross_entropy_with_logits(
+#             tf.cast(labels, tf.float32), logits, pos_weight=cfg.pos_weight))
+#         return loss
+#
+#     def pair_loss():
+#         loss = tf.losses.mean_pairwise_squared_error(
+#             tf.reshape(tf.cast(labels, tf.float32), [-1, 1]), tf.reshape(predicts, [-1, 1]))
+#         return loss
+#
+#     # 此处根据是否包含负样本，tf.cond选择使用的loss函数
+#     combined_loss = tf.cond(tf.greater(tf.reduce_sum(labels), 1), pair_loss, cross_entropy)
+#     summary.append(tf.summary.scalar('loss', combined_loss))
+#     return combined_loss
+
+
+def binary_cross_entropy_with_ranking(labels, logits, outputs, summary):
+    """ Trying to combine ranking loss with numeric precision"""
+    # first get the log loss like normal
+    labels = tf.cast(labels, tf.float32)
+    entropy_loss = tf.reduce_mean(tf.nn.weighted_cross_entropy_with_logits(
+        labels, logits, pos_weight=cfg.pos_weight), name='entropy_loss')
+    summary.append(tf.summary.scalar('entropy_loss', entropy_loss))
+    # next, build a rank loss
+
+    # translate into the raw scores before the logits
+    # score = tf.log(outputs / (1 - outputs))
+
+    # determine what the maximum score for a zero outcome is
+    score_zero_outcome_max = tf.reduce_max(outputs * tf.cast((labels < 1), tf.float32))
+
+    # determine how much each score is above or below it
+    rank_loss = outputs - score_zero_outcome_max
+
+    # only keep losses for positive outcomes
+    rank_loss = tf.maximum(0., -rank_loss * labels)
+
+    # only keep losses where the score is below the max
+    # rank_loss = tf.square(rank_loss)
+
+    # average the loss for just the positive outcomes
+    # rank_loss = tf.reduce_sum(rank_loss) / (tf.reduce_sum(tf.cast(labels > 0, tf.float32)) + 1)
+    rank_loss = tf.reduce_sum(rank_loss)
+    summary.append(tf.summary.scalar('rank_loss', rank_loss))
+
+    # return (rankloss + 1) * logloss - an alternative to try
+    # total_loss = rank_loss + entropy_loss
+    total_loss = (rank_loss + 1) * entropy_loss
+    summary.append(tf.summary.scalar('total_loss', total_loss))
+    return total_loss
 
 
 def cal_auc(labels, outputs):

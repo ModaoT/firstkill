@@ -184,7 +184,7 @@ def get_pos_rate_by_aid(data_set, ads):
 
 def cal_auc(labels, predict, pos_label=1):
     fpr, tpr, thresholds = roc_curve(labels, predict, pos_label=pos_label)
-    return auc(fpr, tpr)
+    return np.mean(fpr), np.mean(tpr), auc(fpr, tpr)
 
 
 def cal_auc_by_aid_per_batch(aids, labels, pres):
@@ -198,7 +198,8 @@ def cal_auc_by_aid_per_batch(aids, labels, pres):
         l = np.array(df[df['aid'] == aid]['labels'])
         p = np.array(df[df['aid'] == aid]['pres'])
         if 1 in l and 0 in l:
-            scores.append(cal_auc(l, p, 1))
+            _, _, _auc = cal_auc(l, p, 1)
+            scores.append(_auc)
     if len(scores) == 0:
         return 0
     else:
@@ -208,15 +209,19 @@ def cal_auc_by_aid_per_batch(aids, labels, pres):
 def cal_auc_by_aid(data_set, log=True):
     aids = data_set['aid'].drop_duplicates()
     auc_list = list()
+    fpr_list = list()
+    tpr_list = list()
     for aid in aids:
         group = data_set[data_set['aid'] == aid]
         labels = group['label']
         scores = group['score']
-        _auc = cal_auc(labels, scores)
+        fpr, tpr, _auc = cal_auc(labels, scores)
         if log:
-            estimated_pos_rate, pos_rate = cal_estimated_pos_rate(group)
-            print('aid:{}, estimated_pos_rate:{:5.3f}, pos_rate:{:5.3f}, auc:{:5.3f}'
-                  .format(aid, estimated_pos_rate, pos_rate, _auc))
+            print('aid:{}, fpr:{:5.3f}, tpr:{:5.3f}, auc:{:5.3f}'
+                  .format(aid, fpr, tpr, _auc))
         auc_list.append(_auc)
+        fpr_list.append(fpr)
+        tpr_list.append(tpr)
 
     print('auc of {} aids:{}'.format(len(aids), np.mean(auc_list)))
+    print('fpr:{} tpr:{}'.format(np.mean(fpr_list), np.mean(tpr_list)))

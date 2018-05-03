@@ -40,71 +40,86 @@ def main(_):
         print(features)
 
 
-def get_data(summary, handle, train=True, valid=True, batch_size=128):
+def get_data(summary, handle, train=True, valid=True, batch_size=128, version=3):
     with tf.name_scope('input'):
         labels = 0
         training_iter, validation_iter = None, None
         if train:
             head, base, interest, kw, topic, appId, training_iter, validation_iter = \
-                create_train_data_input(summary, handle, batch_size=batch_size, repeat=True, valid=valid)
+                create_train_data_input(summary, handle, batch_size=batch_size, repeat=True, valid=valid, version=version)
             aid, uid, labels = tf.split(head, [1, 1, 1], 1)
         else:
             if valid:
                 head, base, interest, kw, topic, appId = create_test_data_input('data/train_valid.csv',
-                                                                                True, batch_size)
+                                                                                True, batch_size, cfg.version)
                 aid, uid, labels = tf.split(head, [1, 1, 1], 1)
             else:
                 head, base, interest, kw, topic, appId = create_test_data_input('data/test_ad_user_all.csv',
-                                                                                False, batch_size)
+                                                                                False, batch_size, cfg.version)
                 aid, uid = tf.split(head, [1, 1], 1)
 
+        if version != 3:
+            with tf.name_scope('input_embedding'):
+                embedded = complex_data_embedding(interest, kw, topic, appId, summary)
+                summary.append(tf.summary.histogram('embedded', embedded))
 
-        with tf.name_scope('input_embedding'):
-            embedded = complex_data_embedding(interest, kw, topic, appId, summary)
-            summary.append(tf.summary.histogram('embedded', embedded))
-
-        features = tf.concat([base, embedded], 1, name='features')
+            features = tf.concat([base, embedded], 1, name='features')
+        else:
+            features = base
 
     return aid, uid, features, labels, training_iter, validation_iter
 
 
-def create_train_data_input(summary, handle, batch_size=128, repeat=True, valid=True):
+def create_train_data_input(summary, handle, batch_size=128, repeat=True, valid=True, version=3):
     with tf.name_scope('origin_data'):
+        interest, kw, topic, appId = None, None, None, None
         training_iter, validation_iter = None, None
         if valid:
-            tr_dataset = read_data('data/train_train.csv', True, batch_size, repeat=repeat)
-            val_dataset = read_data('data/train_valid.csv', True, batch_size, repeat=repeat)
-            iterator = tf.data.Iterator.from_string_handle(handle, tr_dataset.output_types, tr_dataset.output_shapes)
-            head, base, interest, kw, topic, appId = iterator.get_next()
+            if version == 3:
+                tr_dataset = read_data('data/train_train.csv', True, batch_size, repeat=repeat, version=version)
+                val_dataset = read_data('data/train_valid.csv', True, batch_size, repeat=repeat, version=version)
+                iterator = tf.data.Iterator.from_string_handle(handle, tr_dataset.output_types,
+                                                               tr_dataset.output_shapes)
+                head, base = iterator.get_next()
+            else:
+                tr_dataset = read_data('data/train_train.csv', True, batch_size, repeat=repeat, version=version)
+                val_dataset = read_data('data/train_valid.csv', True, batch_size, repeat=repeat, version=version)
+                iterator = tf.data.Iterator.from_string_handle(handle, tr_dataset.output_types, tr_dataset.output_shapes)
+                head, base, interest, kw, topic, appId = iterator.get_next()
 
             training_iter = tr_dataset.make_one_shot_iterator()
             validation_iter = val_dataset.make_one_shot_iterator()
         else:
-            tr_dataset = read_data('data/train_ad_user_all_shuffle.csv', True, batch_size, repeat=repeat)
+            tr_dataset = read_data('data/train_ad_user_all_shuffle.csv', True, batch_size, repeat=repeat, version=version)
             head, base, interest, kw, topic, appId = tr_dataset.make_one_shot_iterator().get_next()
 
-        interest = convert(interest)
-        kw = convert(kw)
-        topic = convert(topic)
-        appId = convert(appId)
+        if version != 3:
+            interest = convert(interest)
+            kw = convert(kw)
+            topic = convert(topic)
+            appId = convert(appId)
+            summary.append(tf.summary.histogram('interest_input', interest))
+            summary.append(tf.summary.histogram('kw_input', kw))
+            summary.append(tf.summary.histogram('topic_input', topic))
+            summary.append(tf.summary.histogram('appId_input', appId))
         summary.append(tf.summary.histogram('base', base))
-        summary.append(tf.summary.histogram('interest_input', interest))
-        summary.append(tf.summary.histogram('kw_input', kw))
-        summary.append(tf.summary.histogram('topic_input', topic))
-        summary.append(tf.summary.histogram('appId_input', appId))
 
     return head, base, interest, kw, topic, appId, training_iter, validation_iter
 
 
-def create_test_data_input(files, valid, batch_size=128):
+def create_test_data_input(files, valid, batch_size=128, version=3):
     with tf.name_scope('origin_data'):
-        dataset = read_data(files, valid, batch_size, repeat=False)
+        dataset = read_data(files, valid, batch_size, repeat=False, version=version)
 
-        head, base, interest, kw, topic, appId = dataset.make_one_shot_iterator().get_next()
-        interest = convert(interest)
-        kw = convert(kw)
-        topic = convert(topic)
-        appId = convert(appId)
+        interest, kw, topic, appId = None, None, None, None
+        if version == 3:
+            head, base = dataset.make_one_shot_iterator().get_next()
+        else:
+            head, base, interest, kw, topic, appId = dataset.make_one_shot_iterator().get_next()
+            interest = convert(interest)
+            kw = convert(kw)
+            topic = convert(topic)
+            appId = convert(appId)
 
     return head, base, interest, kw, topic, appId
 
@@ -142,9 +157,9 @@ def test_embedding():
                 print(feature_embedded_sum)
 
 
-def read_data(files, train, batch_size, repeat):
+def read_data(files, train, batch_size, repeat, version=3):
 
-    def parser(value):
+    def parser_v1(value):
         if train:
             COLUMN_DEFAULTS = [[0], [0], [0],
                                [0.], [0.], [0.], [0.], [0.], [0.], [0.],
@@ -168,13 +183,64 @@ def read_data(files, train, batch_size, repeat):
             interest, kw, topic, appId = tf.decode_csv(value, COLUMN_DEFAULTS)
             head = tf.stack([aid, uid])
 
-        base = tf.stack([advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId,
+        base = tf.stack([tf.log(tf.to_float(aid)), advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId,
                          productType, age, gender, marriageStatus, education, consumptionAbility,
                          LBS, ct, os, carrier, house])
 
         return head, base, interest, kw, topic, appId
 
-    dataset = tf.data.TextLineDataset(files).skip(1).map(parser).batch(batch_size).repeat(count=-1 if repeat else 1)
+    def parser_v3(value):
+        if train:
+            COLUMN_DEFAULTS = [[0], [0], [0],
+                               [0.], [0.], [0.], [0.], [0.], [0.], [0.],
+                               [0.], [0.], [0.], [0.], [0.], [0.],
+                               [0.], [0.], [0.], [0.], [0.],
+                               [0.], [0.], [0.],
+                               [0.], [0.], [0.],
+                               [0.], [0.],
+                               [0.], [0.], [0.], [0.]]
+            aid, uid, label, \
+            advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId, productType, \
+            age, gender, marriageStatus, education, consumptionAbility, LBS, \
+            interest1, interest2, interest3, interest4, interest5, \
+            kw1, kw2, kw3, \
+            topic1, topic2, topic3, \
+            appIdInstall, appIdAction, \
+            ct, os, carrier, house = tf.decode_csv(value, COLUMN_DEFAULTS)
+
+            label = tf.div(tf.add(label, 1), 2)
+            head = tf.stack([aid, uid, label])
+        else:
+            COLUMN_DEFAULTS = [[0], [0],
+                               [0.], [0.], [0.], [0.], [0.], [0.], [0.],
+                               [0.], [0.], [0.], [0.], [0.], [0.],
+                               [0.], [0.], [0.], [0.], [0.],
+                               [0.], [0.], [0.],
+                               [0.], [0.], [0.],
+                               [0.], [0.],
+                               [0.], [0.], [0.], [0.]]
+            aid, uid, \
+            advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId, productType, \
+            age, gender, marriageStatus, education, consumptionAbility, LBS, \
+            interest1, interest2, interest3, interest4, interest5, \
+            kw1, kw2, kw3, \
+            topic1, topic2, topic3, \
+            appIdInstall, appIdAction, \
+            ct, os, carrier, house = tf.decode_csv(value, COLUMN_DEFAULTS)
+            head = tf.stack([aid, uid])
+
+        base = tf.stack([tf.log(tf.to_float(aid)), advertiserId, campaignId, creativeId, creativeSize, adCategoryId, productId,
+                         productType, age, gender, marriageStatus, education, consumptionAbility,
+                         LBS, ct, os, carrier, house])
+
+        return head, base
+
+    if version == 3:
+        dataset = tf.data.TextLineDataset(files).skip(1).map(parser_v3).batch(batch_size).repeat(
+            count=-1 if repeat else 1)
+    else:
+        dataset = tf.data.TextLineDataset(files).skip(1).map(parser_v1).batch(batch_size).repeat(
+            count=-1 if repeat else 1)
 
     return dataset
 
