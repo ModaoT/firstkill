@@ -92,6 +92,8 @@ ENV/
 .idea/
 *checkpoint
 data/*
+data2/*
+data_l500/*
 results/*
 *events.out*
 *.py.swp
