@@ -9,7 +9,7 @@ from tqdm import tqdm
 import data_input
 import utils
 # 超参配置文件
-from config2 import cfg
+from config import cfg
 
 TRAIN_NUM = 8798814
 TRAIN_TRAIN_NUM = 7039051
