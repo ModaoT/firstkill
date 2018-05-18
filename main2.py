@@ -3,6 +3,7 @@ import os
 import numpy as np
 import pandas as pd
 import tensorflow as tf
+from scipy import sparse
 # 进度条工具
 from tqdm import tqdm
 
@@ -41,9 +42,10 @@ def train(graph):
     summary = []
     with graph.as_default():
         inputs = tf.placeholder(dtype=tf.int8, shape=[-1, -1])
+        labels = tf.placeholder(dtype=tf.int8, shape=[-1, 1])
         # 构造网络结构
         is_train = tf.placeholder(dtype=tf.bool)
-        logits, outputs = build_arch(features, cfg.hidden, summary, is_train)
+        logits, outputs = build_arch(inputs, cfg.hidden, summary, is_train)
 
         if cfg.train:
             # 构造损失函数
@@ -73,19 +75,29 @@ def train(graph):
                     tfprof_options=tf.contrib.tfprof.model_analyzer.TRAINABLE_VARS_PARAMS_STAT_OPTIONS)
                 print('total_params: %d\n' % param_stats.total_parameters)
 
+                print('loading data...')
+                tr_x = sparse.load_npz('data/tr_x_30_3473.npz')
+                val_x = sparse.load_npz('data/val_x_30_3473.npz')
+                test_x = sparse.load_npz('data/test_x_30_3473.npz')
+                tr_y = pd.read_csv('data/tr_y.csv')
+                val_y = pd.read_csv('data/val_y.csv')
+                res = pd.read_csv('data/res.csv')
+
                 for e in range(last_epoch, cfg.epoch):
                     print('Training for epoch ' + str(e + 1) + '/' + str(cfg.epoch) + ':')
 
                     bar = tqdm(range(last_step, train_batch), initial=last_step, total=train_batch, ncols=150, leave=False,
                                unit='b')
 
-                    for _ in bar:
+                    for i in bar:
+                        idx = i*cfg.batch
+                        x = tr_x[idx: idx+cfg.batch]
                         if global_step % cfg.summary == 0:
-                            tr_aid, tr_uid, tr_labels, tr_loss, tr_pre, summary_str = sess.run(
-                                [aid, uid, labels, loss, outputs, merged_summary],
-                                feed_dict=tr_sum_feed)
+                            tr_labels, tr_loss, tr_pre, summary_str = sess.run(
+                                [labels, loss, outputs, merged_summary],
+                                feed_dict={inputs: 1, labels: 1, is_train: False})
                             train_writer.add_summary(summary_str, global_step)
-                            tr_auc = utils.cal_auc_by_aid_per_batch(tr_aid, tr_labels, tr_pre)
+                            tr_auc = utils.cal_auc(tr_labels, tr_pre)
 
                             if cfg.valid:
                                 # sess.run(validation_iter.initializer)
@@ -202,27 +214,76 @@ def get_auc_saver(path):
 
 def build_arch(inputs, hide_layer, summary, is_training):
     with tf.name_scope('arch'):
-        layer = inputs
-        for i, num in enumerate(hide_layer):
-            layer = tf.layers.dense(layer, num, activation=None, use_bias=True, name='layer' + str(i+1))
-            layer = tf.layers.batch_normalization(layer, training=is_training, name='bn_layer' + str(i+1))
-            layer = tf.nn.relu(layer, name='act_layer' + str(i+1))
-            layer = tf.layers.dropout(layer, cfg.drop_out, is_training)
-            summary.append(tf.summary.histogram('layer' + str(i+1), layer))
 
-        logits = tf.layers.dense(layer, 1, activation=None, use_bias=True, name='logits')  # logits是用于损失函数的输入，无需activation
-        summary.append(tf.summary.histogram('logits', logits))
-        outputs = tf.sigmoid(logits, name='outputs')
-        summary.append(tf.summary.histogram('outputs', outputs))
+        v = tf.Variable(tf.truncated_normal(shape=[tf.shape(inputs)[1], cfg.embed], stddev=0.01), dtype=tf.float32)
+
+        with tf.variable_scope('FM'):
+            b = tf.get_variable('bias', shape=[1])
+            w1 = tf.get_variable('w1', shape=[tf.shape(inputs)[1], 1], initializer=tf.truncated_normal_initializer(stddev=0.01))
+
+            linear_terms = tf.add(tf.matmul(inputs, w1), b)
+
+            interaction_terms = tf.multiply(0.5, tf.reduce_mean(
+                                                     tf.subtract(
+                                                         tf.pow(tf.matmul(inputs, v), 2),
+                                                         tf.matmul(tf.pow(inputs, 2), tf.pow(v, 2))),
+                                                     1, keep_dims=True))
+
+            y_fm = tf.add(linear_terms, interaction_terms)
+
+            logits = y_fm
+            outputs = tf.sigmoid(logits)
+
+        # with tf.variable_scope('DNN', reuse=False):
+        #     # embedding layer
+        #     y_embedding_input = tf.reshape(tf.gather(v, self.feature_inds), [-1, self.field_cnt * self.k])
+        #     # first hidden layer
+        #     w1 = tf.get_variable('w1_dnn', shape=[self.field_cnt * self.k, 200],
+        #                          initializer=tf.truncated_normal_initializer(mean=0, stddev=1e-2))
+        #     b1 = tf.get_variable('b1_dnn', shape=[200],
+        #                          initializer=tf.constant_initializer(0.001))
+        #     y_hidden_l1 = tf.nn.relu(tf.matmul(y_embedding_input, w1) + b1)
+        #     # second hidden layer
+        #     w2 = tf.get_variable('w2', shape=[200, 200],
+        #                          initializer=tf.truncated_normal_initializer(mean=0, stddev=1e-2))
+        #     b2 = tf.get_variable('b2', shape=[200],
+        #                          initializer=tf.constant_initializer(0.001))
+        #     y_hidden_l2 = tf.nn.relu(tf.matmul(y_hidden_l1, w2) + b2)
+        #     # third hidden layer
+        #     w3 = tf.get_variable('w1', shape=[200, 200],
+        #                          initializer=tf.truncated_normal_initializer(mean=0, stddev=1e-2))
+        #     b3 = tf.get_variable('b1', shape=[200],
+        #                          initializer=tf.constant_initializer(0.001))
+        #     y_hidden_l3 = tf.nn.relu(tf.matmul(y_hidden_l2, w3) + b3)
+        #     # output layer
+        #     w_out = tf.get_variable('w_out', shape=[200, 2],
+        #                             initializer=tf.truncated_normal_initializer(mean=0, stddev=1e-2))
+        #     b_out = tf.get_variable('b_out', shape=[2],
+        #                             initializer=tf.constant_initializer(0.001))
+        #     self.y_dnn = tf.nn.relu(tf.matmul(y_hidden_l3, w_out) + b_out)
+        #     # add FM output and DNN output
+        # self.y_out = tf.add(self.y_fm, self.y_dnn)
+        # self.y_out_prob = tf.nn.softmax(self.y_out)
+
+
+        # layer = inputs
+        # for i, num in enumerate(hide_layer):
+        #     layer = tf.layers.dense(layer, num, activation=None, use_bias=True, name='layer' + str(i+1))
+        #     layer = tf.layers.batch_normalization(layer, training=is_training, name='bn_layer' + str(i+1))
+        #     layer = tf.nn.relu(layer, name='act_layer' + str(i+1))
+        #     layer = tf.layers.dropout(layer, cfg.drop_out, is_training)
+        #     summary.append(tf.summary.histogram('layer' + str(i+1), layer))
+        #
+        # logits = tf.layers.dense(layer, 1, activation=None, use_bias=True, name='logits')  # logits是用于损失函数的输入，无需activation
+        # summary.append(tf.summary.histogram('logits', logits))
+        # outputs = tf.sigmoid(logits, name='outputs')
+        # summary.append(tf.summary.histogram('outputs', outputs))
     return logits, outputs
 
 
 def build_loss(labels, logits, summary, f=''):
-    if f == 'mse':
-        loss = tf.reduce_mean(tf.square(tf.cast(labels, tf.float32) - logits), name='loss')
-    else:
-        loss = tf.reduce_mean(tf.nn.weighted_cross_entropy_with_logits(
-            tf.cast(labels, tf.float32), logits, pos_weight=cfg.pos_weight), name='loss')
+    loss = tf.reduce_mean(tf.nn.weighted_cross_entropy_with_logits(
+        tf.cast(labels, tf.float32), logits, pos_weight=cfg.pos_weight), name='loss')
     summary.append(tf.summary.scalar('loss', loss))
     return loss
 
