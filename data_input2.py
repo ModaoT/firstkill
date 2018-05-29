@@ -50,6 +50,7 @@ def read_data(dir, cls):
 
 
 def get_test_data(test_set):
+    print('reading test data...')
     if test_set == 1:
         test_x, _ = read_data('test', 'test1' if cfg.feature == 1 else 'test1_hash')
     elif test_set == 2:
@@ -60,6 +61,7 @@ def get_test_data(test_set):
 
 
 def get_valid_data():
+    print('reading valid data from fold', cfg.fold, '...')
     if cfg.fold == 1:
         val_x, val_y = read_data('tr1', 'tr' if cfg.feature == 1 else 'tr_hash')
     elif cfg.fold == 2:
@@ -74,15 +76,15 @@ def get_valid_data():
 
 
 def get_train_data(stage=0):
-    data_set = np.array(['tr1', 'tr2', 'tr3', 'tr4'])
+    print('reading train data from fold', cfg.fold, '...')
     if cfg.fold == 1:
-        tr = data_set[1, 2, 3]
+        tr = ['tr2', 'tr3', 'tr4']
     elif cfg.fold == 2:
-        tr = data_set[0, 2, 3]
+        tr = ['tr1', 'tr3', 'tr4']
     elif cfg.fold == 3:
-        tr = data_set[0, 1, 3]
+        tr = ['tr1', 'tr2', 'tr4']
     elif cfg.fold == 4:
-        tr = data_set[0, 1, 2]
+        tr = ['tr1', 'tr2', 'tr3']
     else:
         return None
     tr_x, tr_y = read_data(tr[stage], 'tr' if cfg.feature == 1 else 'tr_hash')

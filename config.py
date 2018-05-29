@@ -15,8 +15,8 @@ flags.DEFINE_integer('fold', 1, 'k折训练的阶段：1，在234训练，在1�
 flags.DEFINE_integer('test_set', 1, '使用哪个测试集：1，A赛段；2，B赛段')
 
 flags.DEFINE_float('drop_out', 0.1, 'drop out比率')
-flags.DEFINE_integer('batch', 512, '设置批大小')
-flags.DEFINE_integer('epoch', 1, '设置训练的轮数')
+flags.DEFINE_integer('batch', 2048, '设置批大小')
+flags.DEFINE_integer('epoch', 2, '设置训练的轮数')
 flags.DEFINE_integer('checkpoint', 200, '每隔多少个批次保存一次模型')
 flags.DEFINE_integer('summary', 50, '每隔多少个批次记录一次日志')
 flags.DEFINE_boolean('train', True, '选择是训练还是推理')

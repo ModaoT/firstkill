@@ -68,6 +68,7 @@ def train(graph):
                 print('Training for epoch ' + str(e + 1) + '/' + str(cfg.epoch) + ':')
                 val_x, val_y, val_size = data_input2.get_valid_data()
                 for stage in range(last_stage, 4):
+                    print('stage', stage, ':')
                     tr_x, tr_y, tr_size = data_input2.get_train_data(stage)
                     train_batch = tr_size // cfg.batch
                     bar = tqdm(range(local_step, train_batch+1), initial=last_epoch, total=train_batch, ncols=150, leave=False,
@@ -96,6 +97,8 @@ def train(graph):
                                            labels: tr_y_batch,
                                            is_train: False})
                             train_writer.add_summary(summary_str, global_step)
+                            if val_idx + cfg.batch >= val_size:
+                                val_idx = 0
                             val_x_batch = val_x[val_idx: val_idx + cfg.batch].tocoo()
                             val_y_batch = val_y[val_idx: val_idx + cfg.batch]
                             val_idx += cfg.batch
@@ -122,7 +125,7 @@ def train(graph):
                             saver.save(sess,
                                        cfg.logdir + '/model.ckpt-%02d-%02d-%05d-%05d' % (e, stage, i, global_step))
                     bar.close()
-                saver.save(sess, cfg.logdir + '/model.ckpt-%02d-%02d-%05d-%05d' % (e, 4, 0, global_step))
+                saver.save(sess, cfg.logdir + '/model.ckpt-%02d-%02d-%05d-%05d' % (e+1, 4, 0, global_step))
             train_writer.close()
             valid_writer.close()
 
@@ -248,7 +251,7 @@ def build_arch(feature, hide_layer, summary, is_training):
                 part2 = tf.sparse_tensor_dense_matmul(tf.square(feature), tf.square(v))
 
                 interaction_terms = tf.multiply(0.5,
-                                                tf.reduce_mean(tf.subtract(part1, part2), name='interaction'), 1)
+                                                tf.reduce_mean(tf.subtract(part1, part2), 1), name='interaction')
                 summary.append(tf.summary.histogram('interaction_terms', interaction_terms))
 
                 y_fm = tf.add(linear_terms, interaction_terms, name='fm_out')
@@ -287,7 +290,7 @@ def build_arch(feature, hide_layer, summary, is_training):
             logits = y_fm + y_dnn
 
         summary.append(tf.summary.histogram('logits', logits))
-        outputs = tf.sigmoid(logits, name='outputs')
+        outputs = tf.sigmoid(logits, name='final_outputs')
         summary.append(tf.summary.histogram('outputs', outputs))
 
     return logits, outputs
