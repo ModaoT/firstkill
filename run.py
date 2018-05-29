@@ -10,11 +10,11 @@ import data_input
 import utils
 # 超参配置文件
 from config import cfg
-from data_input import ADVERTISERID_LEN, CAMPAIGNID_LEN, CREATIVEID_LEN, CREATIVESIZE_LEN, ADCATEGORYID_LEN, PRODUCTID_LEN, PRODUCTTYPE_LEN, LBS_LEN, AGE_LEN, CARRIER_LEN, CONSUMPTIONABILITY_LEN, CT_LEN, EDUCATION_LEN, GENDER_LEN, HOUSE_LEN, MARRIAGESTATUS_LEN, OS_LEN, AID__LEN, INTEREST_LEN, KW_LEN, TOPIC_LEN, APP_LEN
+from data_input import ADVERTISERID_LEN, CAMPAIGNID_LEN, CREATIVEID_LEN, CREATIVESIZE_LEN, ADCATEGORYID_LEN, PRODUCTID_LEN, PRODUCTTYPE_LEN, LBS_LEN, AGE_LEN, CARRIER_LEN, CONSUMPTIONABILITY_LEN, CT_LEN, EDUCATION_LEN, GENDER_LEN, HOUSE_LEN, MARRIAGESTATUS_LEN, OS_LEN, AID__LEN, EMBED_LEN
 
 BASE_LEN = ADVERTISERID_LEN+CAMPAIGNID_LEN+CREATIVEID_LEN+CREATIVESIZE_LEN+ADCATEGORYID_LEN+PRODUCTID_LEN+PRODUCTTYPE_LEN+AGE_LEN+CARRIER_LEN+CONSUMPTIONABILITY_LEN+CT_LEN+EDUCATION_LEN+GENDER_LEN+MARRIAGESTATUS_LEN+OS_LEN+AID__LEN
 HAS_NA = LBS_LEN+HOUSE_LEN
-INPUT_LEN = BASE_LEN+HAS_NA+INTEREST_LEN+KW_LEN+TOPIC_LEN+APP_LEN
+INPUT_LEN = BASE_LEN+HAS_NA+EMBED_LEN
 
 TRAIN_NUM = 8798814
 TRAIN_TRAIN_NUM = 7039051
@@ -47,16 +47,12 @@ def train(graph):
     with graph.as_default():
         with tf.name_scope('Input'):
             feature_base = tf.placeholder(dtype=tf.int32, shape=[None, 18], name='base')
-            feature_interest = tf.placeholder(dtype=tf.string, shape=[None], name='interest')
-            feature_kw = tf.placeholder(dtype=tf.string, shape=[None], name='kw')
-            feature_topic = tf.placeholder(dtype=tf.string, shape=[None], name='topic')
-            feature_app = tf.placeholder(dtype=tf.string, shape=[None], name='app')
+            feature_embed = tf.placeholder(dtype=tf.string, shape=[None], name='embed')
             labels = tf.placeholder(dtype=tf.int32, shape=[None, 1], name='labels')
             is_train = tf.placeholder(dtype=tf.bool, shape=[])
 
         # 构造网络结构
-        logits, outputs = build_arch(feature_base, feature_interest,
-                                     feature_kw, feature_topic, feature_app, cfg.hidden, summary, is_train)
+        logits, outputs = build_arch(feature_base, feature_embed, cfg.hidden, summary, is_train)
 
         if cfg.train:
             # 构造损失函数
@@ -101,16 +97,13 @@ def train(graph):
                         tr_y_batch = tr_y.get_chunk(cfg.batch)
                         tr_y_batch = tr_y_batch.as_matrix()
 
-                        tr_base, tr_interest, tr_kw, tr_topic, tr_app = data_input.parse_feature(tr_x_batch)
+                        tr_base, tr_embed = data_input.parse_feature(tr_x_batch)
 
                         if global_step % cfg.summary == 0:
                             tr_labels, tr_loss, tr_pre, summary_str = sess.run(
                                 [labels, loss, outputs, merged_summary],
                                 feed_dict={feature_base: tr_base,
-                                           feature_interest: tr_interest,
-                                           feature_kw: tr_kw,
-                                           feature_topic: tr_topic,
-                                           feature_app: tr_app,
+                                           feature_embed: tr_embed,
                                            labels: tr_y_batch,
                                            is_train: False})
                             train_writer.add_summary(summary_str, global_step)
@@ -125,16 +118,12 @@ def train(graph):
                                     val_x_batch = val_x.get_chunk(cfg.batch)
                                     val_y_batch = val_y.get_chunk(cfg.batch)
 
-                                val_base, val_interest, val_kw, \
-                                    val_topic, val_app = data_input.parse_feature(val_x_batch)
+                                val_base, val_embed = data_input.parse_feature(val_x_batch)
 
                                 val_labels, val_loss, val_pre, summary_str = sess.run(
                                     [labels, loss, outputs, merged_summary],
                                     feed_dict={feature_base: val_base,
-                                               feature_interest: val_interest,
-                                               feature_kw: val_kw,
-                                               feature_topic: val_topic,
-                                               feature_app: val_app,
+                                               feature_embed: val_embed,
                                                labels: val_y_batch,
                                                is_train: False})
                                 valid_writer.add_summary(summary_str, global_step)
@@ -155,10 +144,7 @@ def train(graph):
                             auc_saver.flush()
                         else:
                             sess.run(opt, feed_dict={feature_base: tr_base,
-                                                     feature_interest: tr_interest,
-                                                     feature_kw: tr_kw,
-                                                     feature_topic: tr_topic,
-                                                     feature_app: tr_app,
+                                                     feature_embed: tr_embed,
                                                      labels: tr_y_batch,
                                                      is_train: True})
 
@@ -198,14 +184,10 @@ def evaluate(graph):
 
         # 构造网络结构
         feature_base = tf.placeholder(dtype=tf.int32, shape=[None, 18], name='base')
-        feature_interest = tf.placeholder(dtype=tf.string, shape=[None], name='interest')
-        feature_kw = tf.placeholder(dtype=tf.string, shape=[None], name='kw')
-        feature_topic = tf.placeholder(dtype=tf.string, shape=[None], name='topic')
-        feature_app = tf.placeholder(dtype=tf.string, shape=[None], name='app')
+        feature_embed = tf.placeholder(dtype=tf.string, shape=[None], name='embed')
 
         # 构造网络结构
-        logits, outputs = build_arch(feature_base, feature_interest,
-                                     feature_kw, feature_topic, feature_app, cfg.hidden, [], False)
+        logits, outputs = build_arch(feature_base, feature_embed, cfg.hidden, [], False)
 
         init_op = tf.group([tf.global_variables_initializer(), tf.local_variables_initializer()])
         saver = tf.train.Saver()
@@ -217,20 +199,15 @@ def evaluate(graph):
             saver.restore(sess, ckpt.model_checkpoint_path)
 
             print('computing result ...')
-            # bar = tqdm(range(0, batch_num + 1), total=batch_num, ncols=100, leave=False,
-            #            unit='b')
-            bar = tqdm(range(0, batch_num), total=batch_num, ncols=100, leave=False,
+            bar = tqdm(range(0, batch_num + 1), total=batch_num, ncols=100, leave=False,
                        unit='b')
             for _ in bar:
                 x_batch = X.get_chunk(cfg.batch)
 
-                base, interest, kw, topic, app = data_input.parse_feature(x_batch)
+                base, embed = data_input.parse_feature(x_batch)
 
                 _outputs = sess.run(outputs, feed_dict={feature_base: base,
-                                                        feature_interest: interest,
-                                                        feature_kw: kw,
-                                                        feature_app: app,
-                                                        feature_topic: topic})
+                                                        feature_embed: embed})
 
                 result = np.append(result, _outputs)
 
@@ -245,7 +222,7 @@ def evaluate(graph):
                 print('computing auc ...')
                 utils.cal_auc_by_aid(valid_data[['aid', 'uid', 'label', 'score']])
             else:
-                print('reading test_ad_user_all.csv ...')
+                print('reading res.csv ...')
                 test_data = pd.read_csv('data/res.csv')
                 test_data['score'] = np.array(result)
                 print('writing results into submission.csv ...')
@@ -270,7 +247,7 @@ def get_auc_saver(path):
     return fd_train_auc
 
 
-def build_arch(base, interest, kw, topic, app, hide_layer, summary, is_training):
+def build_arch(base, embed, hide_layer, summary, is_training):
     with tf.name_scope('arch'):
         v_base = tf.Variable(tf.truncated_normal(shape=[BASE_LEN, cfg.embed], stddev=0.01), dtype=tf.float32)
 
@@ -281,17 +258,11 @@ def build_arch(base, interest, kw, topic, app, hide_layer, summary, is_training)
 
         v_base = tf.concat([v_base, v_lbs, v_house], 0)
 
-        v_interest = tf.Variable(tf.truncated_normal(shape=[INTEREST_LEN-1, cfg.embed], stddev=0.01), dtype=tf.float32)
-        v_interest = tf.concat([tf.zeros([1, cfg.embed]), v_interest], 0)
-        v_kw = tf.Variable(tf.truncated_normal(shape=[KW_LEN-1, cfg.embed], stddev=0.01), dtype=tf.float32)
-        v_kw = tf.concat([tf.zeros([1, cfg.embed]), v_kw], 0)
-        v_topic = tf.Variable(tf.truncated_normal(shape=[TOPIC_LEN-1, cfg.embed], stddev=0.01), dtype=tf.float32)
-        v_topic = tf.concat([tf.zeros([1, cfg.embed]), v_topic], 0)
-        v_app = tf.Variable(tf.truncated_normal(shape=[APP_LEN-1, cfg.embed], stddev=0.01), dtype=tf.float32)
-        v_app = tf.concat([tf.zeros([1, cfg.embed]), v_app], 0)
+        v_embed = tf.Variable(tf.truncated_normal(shape=[EMBED_LEN-1, cfg.embed], stddev=0.01), dtype=tf.float32)
+        v_embed = tf.concat([tf.zeros([1, cfg.embed]), v_embed], 0)
 
         with tf.variable_scope('FM'):
-            b = tf.get_variable('bias', shape=[1])
+            b = tf.get_variable('bias', shape=[1], initializer=tf.zeros_initializer())
             w_base = tf.get_variable('w_base', shape=[BASE_LEN, 1],
                                      initializer=tf.truncated_normal_initializer(stddev=0.01))
 
@@ -302,80 +273,48 @@ def build_arch(base, interest, kw, topic, app, hide_layer, summary, is_training)
 
             w_base = tf.concat([w_base, w_lbs, w_house], 0)
 
-            w_interest = tf.get_variable('w_interest', shape=[INTEREST_LEN-1, 1],
-                                         initializer=tf.truncated_normal_initializer(stddev=0.01))
-            w_interest = tf.concat([tf.zeros([1, 1]), w_interest], 0)
-            w_kw = tf.get_variable('w_kw', shape=[KW_LEN-1, 1],
-                                   initializer=tf.truncated_normal_initializer(stddev=0.01))
-            w_kw = tf.concat([tf.zeros([1, 1]), w_kw], 0)
-            w_topic = tf.get_variable('w_topic', shape=[TOPIC_LEN-1, 1],
+            w_embed = tf.get_variable('w_embed', shape=[EMBED_LEN-1, 1],
                                       initializer=tf.truncated_normal_initializer(stddev=0.01))
-            w_topic = tf.concat([tf.zeros([1, 1]), w_topic], 0)
-            w_app = tf.get_variable('w_app', shape=[APP_LEN-1, 1],
-                                    initializer=tf.truncated_normal_initializer(stddev=0.01))
-            w_app = tf.concat([tf.zeros([1, 1]), w_app], 0)
+            w_embed = tf.concat([tf.zeros([1, 1]), w_embed], 0)
 
-            converted_interest = data_input.convert(interest)
-            converted_kw = data_input.convert(kw)
-            converted_topic = data_input.convert(topic)
-            converted_app = data_input.convert(app)
+            converted_embed = data_input.convert(embed)
 
             # 等效于tf.matmul(X, w)
             w_lookup_base = tf.reduce_sum(tf.nn.embedding_lookup(w_base, base), -2)
 
-            w_lookup_interest = tf.reduce_sum(tf.nn.embedding_lookup(w_interest, converted_interest), -2)
-            w_lookup_kw = tf.reduce_sum(tf.nn.embedding_lookup(w_kw, converted_kw), -2)
-            w_lookup_topic = tf.reduce_sum(tf.nn.embedding_lookup(w_topic, converted_topic), -2)
-            w_lookup_app = tf.reduce_sum(tf.nn.embedding_lookup(w_app, converted_app), -2)
+            w_lookup_embed = tf.reduce_sum(tf.nn.embedding_lookup(w_embed, converted_embed), -2)
 
-            linear_terms = tf.add(w_lookup_base, w_lookup_interest)
-            linear_terms = tf.add(linear_terms, w_lookup_kw)
-            linear_terms = tf.add(linear_terms, w_lookup_topic)
-            linear_terms = tf.add(linear_terms, w_lookup_app)
-            linear_terms = tf.add(linear_terms, b)
+            linear_terms = tf.add(w_lookup_base, w_lookup_embed)
+            linear_terms = tf.add(linear_terms, b, name='linear')
             summary.append(tf.summary.histogram('linear_terms', linear_terms))
 
             # 等效于tf.matmul(X, v)
             v_lookup_base1 = tf.reduce_sum(tf.nn.embedding_lookup(v_base, base), -2)
-            v_lookup_interest1 = tf.reduce_sum(tf.nn.embedding_lookup(v_interest, converted_interest), -2)
-            v_lookup_kw1 = tf.reduce_sum(tf.nn.embedding_lookup(v_kw, converted_kw), -2)
-            v_lookup_topic1 = tf.reduce_sum(tf.nn.embedding_lookup(v_topic, converted_topic), -2)
-            v_lookup_app1 = tf.reduce_sum(tf.nn.embedding_lookup(v_app, converted_app), -2)
+            v_lookup_embed1 = tf.reduce_sum(tf.nn.embedding_lookup(v_embed, converted_embed), -2)
 
-            part1 = tf.add(v_lookup_base1, v_lookup_interest1)
-            part1 = tf.add(part1, v_lookup_kw1)
-            part1 = tf.add(part1, v_lookup_topic1)
-            part1 = tf.add(part1, v_lookup_app1)
+            part1 = tf.add(v_lookup_base1, v_lookup_embed1)
 
             # 等效于tf.matmul(X^2, v^2)
             v_lookup_base2 = tf.reduce_sum(tf.pow(tf.nn.embedding_lookup(v_base, base), 2), -2)
-            v_lookup_interest2 = tf.reduce_sum(tf.pow(tf.nn.embedding_lookup(v_interest, converted_interest), 2), -2)
-            v_lookup_kw2 = tf.reduce_sum(tf.pow(tf.nn.embedding_lookup(v_kw, converted_kw), 2), -2)
-            v_lookup_topic2 = tf.reduce_sum(tf.pow(tf.nn.embedding_lookup(v_topic, converted_topic), 2), -2)
-            v_lookup_app2 = tf.reduce_sum(tf.pow(tf.nn.embedding_lookup(v_app, converted_app), 2), -2)
+            v_lookup_embed2 = tf.reduce_sum(tf.pow(tf.nn.embedding_lookup(v_embed, converted_embed), 2), -2)
 
-            part2 = tf.add(v_lookup_base2, v_lookup_interest2)
-            part2 = tf.add(part2, v_lookup_kw2)
-            part2 = tf.add(part2, v_lookup_topic2)
-            part2 = tf.add(part2, v_lookup_app2)
+            part2 = tf.add(v_lookup_base2, v_lookup_embed2)
 
-            interaction_terms = tf.multiply(0.5,
-                                            tf.reduce_mean(tf.subtract(tf.pow(part1, 2), part2), 1, keepdims=True))
+            # interaction_terms = tf.multiply(0.5,
+            #                                 tf.reduce_mean(tf.subtract(tf.pow(part1, 2), part2), 1, keepdims=True))
+            interaction_terms = tf.multiply(0.5, tf.subtract(tf.pow(part1, 2), part2), name='interaction')
             summary.append(tf.summary.histogram('interaction_terms', interaction_terms))
 
-            y_fm = tf.add(linear_terms, interaction_terms)
+            # y_fm = tf.add(linear_terms, interaction_terms)
+            y_fm = tf.concat([linear_terms, interaction_terms], -1, name='fm_out')
             summary.append(tf.summary.histogram('fm_outputs', y_fm))
 
         with tf.variable_scope('DNN', reuse=False):
             # embedding layer
             embedding_input_base = tf.reshape(tf.gather(v_base, base), [-1, 18 * cfg.embed])  # 18为base特征数量
-            embedding_input_interest = tf.reduce_mean(tf.nn.embedding_lookup(v_interest, converted_interest), -2)
-            embedding_input_kw = tf.reduce_mean(tf.nn.embedding_lookup(v_kw, converted_kw), -2)
-            embedding_input_topic = tf.reduce_mean(tf.nn.embedding_lookup(v_topic, converted_topic), -2)
-            embedding_input_app = tf.reduce_mean(tf.nn.embedding_lookup(v_app, converted_app), -2)
+            embedding_input_embed = tf.reduce_mean(tf.nn.embedding_lookup(v_embed, converted_embed), -2)
 
-            embedding_input = tf.concat([embedding_input_base, embedding_input_interest,
-                                         embedding_input_kw, embedding_input_topic, embedding_input_app], -1)
+            embedding_input = tf.concat([embedding_input_base, embedding_input_embed], -1)
 
             layer = embedding_input
             for i, num in enumerate(hide_layer):
@@ -383,13 +322,23 @@ def build_arch(base, interest, kw, topic, app, hide_layer, summary, is_training)
                 layer = tf.layers.batch_normalization(layer, training=is_training, name='bn_layer' + str(i+1))
                 layer = tf.nn.relu(layer, name='act_layer' + str(i+1))
                 layer = tf.layers.dropout(layer, cfg.drop_out, is_training)
-                summary.append(tf.summary.histogram('layer' + str(i+1), layer))
+                # summary.append(tf.summary.histogram('layer' + str(i+1), layer))
 
-            y_dnn = tf.layers.dense(layer, 1, activation=None, use_bias=True, name='logits')
+            y_dnn = tf.layers.dense(layer, 1, activation=tf.nn.relu, use_bias=True, name='y_dnn')
             summary.append(tf.summary.histogram('dnn_outputs', y_dnn))
 
         # add FM output and DNN output
-        logits = tf.add(y_fm, y_dnn)
+        # logits = tf.add(cfg.fm * y_fm, cfg.dnn * y_dnn, name='logits')
+        combine = tf.layers.batch_normalization(tf.concat([y_fm, y_dnn], axis=1), training=is_training, name='combine')
+
+        layer = combine
+        for i, num in enumerate([128, 64, 32]):
+            layer = tf.layers.dense(layer, num, activation=None, use_bias=True, name='layer' + str(i + 1))
+            layer = tf.layers.batch_normalization(layer, training=is_training, name='bn_layer' + str(i + 1))
+            layer = tf.nn.relu(layer, name='act_layer' + str(i + 1))
+            layer = tf.layers.dropout(layer, cfg.drop_out, is_training)
+
+        logits = tf.layers.dense(layer, 1, activation=None, use_bias=True, name='logits')
         summary.append(tf.summary.histogram('logits', logits))
         outputs = tf.sigmoid(logits, name='outputs')
         summary.append(tf.summary.histogram('outputs', outputs))

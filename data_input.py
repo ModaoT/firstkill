@@ -38,8 +38,8 @@ def main(_):
 def get_data(train=True, valid=True):
     if train:
         if valid:
-            tr_x = pd.read_csv('data/tr_x.csv', iterator=True)
-            tr_y = pd.read_csv('data/tr_y.csv', iterator=True)
+            tr_x = pd.read_csv('data/tr_tf_x.csv', iterator=True)
+            tr_y = pd.read_csv('data/tr_tf_y.csv', iterator=True)
             return tr_x, tr_y
         else:
             train_x = pd.read_csv('data/train_x.csv', iterator=True)
@@ -47,8 +47,8 @@ def get_data(train=True, valid=True):
             return train_x, train_y
     else:
         if valid:
-            val_x = pd.read_csv('data/val_x.csv', iterator=True)
-            val_y = pd.read_csv('data/val_y.csv', iterator=True)
+            val_x = pd.read_csv('data/val_tf_x.csv', iterator=True)
+            val_y = pd.read_csv('data/val_tf_y.csv', iterator=True)
             return val_x, val_y
         else:
             test_x = pd.read_csv('data/test_x.csv', iterator=True)
@@ -79,10 +79,7 @@ HOUSE_LEN = 2
 MARRIAGESTATUS_LEN = 26
 OS_LEN = 4
 AID__LEN = 173
-INTEREST_LEN = 359
-KW_LEN = 16226
-TOPIC_LEN = 14877
-APP_LEN = 5033
+EMBED_LEN = 36479
 
 
 def parse_normal_feature(data, one_hot_length):
@@ -154,12 +151,9 @@ def parse_feature(data):
     data.house += baseline
 
     base = data[BASE_COLUMNS]
-    interest = data['interest']
-    kw = data['kw']
-    topic = data['topic']
-    app = data['app']
+    embed = data['embed']
 
-    return base.as_matrix(), interest.as_matrix(), kw.as_matrix(), topic.as_matrix(), app.as_matrix()
+    return base.as_matrix(), embed.as_matrix()
 
 
 def get_data_(summary, handle, train=True, valid=True, batch_size=128):
