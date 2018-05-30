@@ -209,6 +209,7 @@ def evaluate(graph):
                 else:
                     test_data = pd.read_csv('data/output/test/res2.csv')
                 test_data['score'] = np.array(result)
+                test_data['score'] = test_data['score'].apply(lambda x: float('%.6f' % x))
                 print('writing results into submission.csv ...')
                 test_data[['aid', 'uid', 'score']].to_csv('results/submission.csv', columns=['aid', 'uid', 'score'],
                                                           index=False)

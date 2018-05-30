@@ -12,6 +12,7 @@ HASH_LEN = 3188
 
 def read_data(dir, cls):
     y_file = None
+    y = None
     if dir == 'test':
         directory = 'data/output/test/'
     elif dir == 'tr1':
@@ -51,6 +52,8 @@ def read_data(dir, cls):
 
 def get_test_data(test_set):
     print('reading test data...')
+    print('test set：', test_set)
+    print('data type:', 'lgb' if cfg.feature == 1 else 'hash')
     if test_set == 1:
         test_x, _ = read_data('test', 'test1' if cfg.feature == 1 else 'test1_hash')
     elif test_set == 2:
@@ -62,7 +65,7 @@ def get_test_data(test_set):
 
 def get_valid_data():
     print('reading valid data from fold', cfg.fold, '...')
-    print('data type: ', 'lgb' if cfg.feature == 1 else 'hash')
+    print('data type:', 'lgb' if cfg.feature == 1 else 'hash')
     if cfg.fold == 1:
         val_x, val_y = read_data('tr1', 'tr' if cfg.feature == 1 else 'tr_hash')
     elif cfg.fold == 2:
