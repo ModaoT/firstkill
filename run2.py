@@ -131,26 +131,25 @@ def train(graph):
 
 
 def evaluate(graph):
+    if cfg.valid:
+        # 获取上一次保存的状态
+        ckpt, last_epoch, last_stage, local_step, global_step = get_last_state(cfg.logdir)
+        # 读取数据
+        X, y, data_size = data_input2.get_valid_data()
+
+    else:  # 使用测试集生成submission
+        # 获取上一次保存的状态
+        ckpt, _, _, _, _ = get_last_state(cfg.logdir)
+        # 读取数据
+        X, data_size = data_input2.get_test_data(cfg.test_set)
+
+    batch_num = data_size // cfg.batch
+    if ckpt is None:
+        print('No ckpt found!')
+        return
+
+    result = np.zeros([data_size, 1])
     with graph.as_default():
-        if cfg.valid:
-            # 获取上一次保存的状态
-            ckpt, last_epoch, last_stage, local_step, global_step = get_last_state(cfg.logdir)
-            # 读取数据
-            X, y, data_size = data_input2.get_valid_data()
-
-        else:  # 使用测试集生成submission
-            # 获取上一次保存的状态
-            ckpt, _, _, _, _ = get_last_state(cfg.logdir)
-            # 读取数据
-            X, data_size = data_input2.get_test_data(cfg.test_set)
-
-        batch_num = data_size // cfg.batch
-
-        if ckpt is None:
-            print('No ckpt found!')
-            return
-
-        result = np.array([], dtype=np.float32)
 
         indices_i = tf.placeholder(dtype=tf.int64, shape=[None, 2])
         values_i = tf.placeholder(dtype=tf.float32, shape=[None])
@@ -176,10 +175,8 @@ def evaluate(graph):
             for i in bar:
                 if i == batch_num:
                     x_batch = X[test_idx:].tocoo()
-                    test_idx = data_size - 1
                 else:
                     x_batch = X[test_idx: test_idx + cfg.batch].tocoo()
-                    test_idx += cfg.batch
                 indics = np.mat([x_batch.row, x_batch.col]).transpose()
                 values = x_batch.data
                 dense_shapes = x_batch.shape
@@ -187,14 +184,21 @@ def evaluate(graph):
                 _outputs = sess.run(outputs, feed_dict={indices_i: indics,
                                                         values_i: values,
                                                         dense_shape_i: dense_shapes})
-
-                result = np.append(result, _outputs)
+                if i == batch_num:
+                    result[test_idx:] = _outputs
+                    test_idx = data_size - 1
+                else:
+                    result[test_idx: test_idx + cfg.batch] = _outputs
+                    test_idx += cfg.batch
+                del _outputs
 
             bar.close()
+            print('result shape:', result)
             print('scores length: ', len(result))  # 2265989
             if cfg.valid:
                 print('computing auc ...')
-                utils.cal_auc(y, result)
+                _, _, auc = utils.cal_auc(y, result)
+                print('auc:', auc)
             else:
                 print('reading res.csv ...')
                 if cfg.test_set == 1:
@@ -251,7 +255,7 @@ def build_arch(feature, hide_layer, summary, is_training):
                 part2 = tf.sparse_tensor_dense_matmul(tf.square(feature), tf.square(v))
 
                 interaction_terms = tf.multiply(0.5,
-                                                tf.reduce_mean(tf.subtract(part1, part2), 1), name='interaction')
+                                                tf.reduce_mean(tf.subtract(part1, part2), 1, keep_dims=True), name='interaction')
                 summary.append(tf.summary.histogram('interaction_terms', interaction_terms))
 
                 y_fm = tf.add(linear_terms, interaction_terms, name='fm_out')
@@ -264,12 +268,12 @@ def build_arch(feature, hide_layer, summary, is_training):
                     dnn_v = tf.Variable(
                         tf.truncated_normal(shape=[data_input2.LGB_LEN, cfg.embed], mean=0, stddev=0.01),
                         dtype='float32')
-                    dnn_input = tf.reshape(tf.sparse_tensor_dense_matmul(feature, dnn_v), [-1, cfg.embed * data_input2.LGB_LEN])
+                    dnn_input = tf.sparse_tensor_dense_matmul(feature, dnn_v)
                 else:  # hash特征
                     dnn_v = tf.Variable(
                         tf.truncated_normal(shape=[data_input2.HASH_LEN, cfg.embed], mean=0, stddev=0.01),
                         dtype='float32')
-                    dnn_input = tf.reshape(tf.sparse_tensor_dense_matmul(feature, dnn_v), [-1, cfg.embed * data_input2.HASH_LEN])
+                    dnn_input = tf.sparse_tensor_dense_matmul(feature, dnn_v)
 
                 layer = dnn_input
                 for i, num in enumerate(hide_layer):
