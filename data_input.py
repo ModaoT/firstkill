@@ -62,6 +62,7 @@ def get_test_data(test_set):
 
 def get_valid_data():
     print('reading valid data from fold', cfg.fold, '...')
+    print('data type: ', 'lgb' if cfg.feature == 1 else 'hash')
     if cfg.fold == 1:
         val_x, val_y = read_data('tr1', 'tr' if cfg.feature == 1 else 'tr_hash')
     elif cfg.fold == 2:
@@ -77,6 +78,7 @@ def get_valid_data():
 
 def get_train_data(stage=0):
     print('reading train data from fold', cfg.fold, '...')
+    print('data type: ', 'lgb' if cfg.feature == 1 else 'hash')
     if cfg.fold == 1:
         tr = ['tr2', 'tr3', 'tr4']
     elif cfg.fold == 2:

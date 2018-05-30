@@ -6,7 +6,7 @@ import tensorflow as tf
 # 进度条工具
 from tqdm import tqdm
 
-import data_input2
+import data_input
 import utils
 # 超参配置文件
 from config import cfg
@@ -66,10 +66,11 @@ def train(graph):
 
             for e in range(last_epoch, cfg.epoch):
                 print('Training for epoch ' + str(e + 1) + '/' + str(cfg.epoch) + ':')
-                val_x, val_y, val_size = data_input2.get_valid_data()
-                for stage in range(last_stage, 4):
+                val_x, val_y, val_size = data_input.get_valid_data()
+                for stage in range(last_stage, 3):
+                    print()
                     print('stage', stage, ':')
-                    tr_x, tr_y, tr_size = data_input2.get_train_data(stage)
+                    tr_x, tr_y, tr_size = data_input.get_train_data(stage)
                     train_batch = tr_size // cfg.batch
                     bar = tqdm(range(local_step, train_batch+1), initial=last_epoch, total=train_batch, ncols=150, leave=False,
                                unit='b')
@@ -125,6 +126,8 @@ def train(graph):
                             saver.save(sess,
                                        cfg.logdir + '/model.ckpt-%02d-%02d-%05d-%05d' % (e, stage, i, global_step))
                     bar.close()
+                    print()
+                    print('stage', stage, 'finished!')
                 saver.save(sess, cfg.logdir + '/model.ckpt-%02d-%02d-%05d-%05d' % (e+1, 4, 0, global_step))
             train_writer.close()
             valid_writer.close()
@@ -135,13 +138,13 @@ def evaluate(graph):
         # 获取上一次保存的状态
         ckpt, last_epoch, last_stage, local_step, global_step = get_last_state(cfg.logdir)
         # 读取数据
-        X, y, data_size = data_input2.get_valid_data()
+        X, y, data_size = data_input.get_valid_data()
 
     else:  # 使用测试集生成submission
         # 获取上一次保存的状态
         ckpt, _, _, _, _ = get_last_state(cfg.logdir)
         # 读取数据
-        X, data_size = data_input2.get_test_data(cfg.test_set)
+        X, data_size = data_input.get_test_data(cfg.test_set)
 
     batch_num = data_size // cfg.batch
     if ckpt is None:
@@ -193,7 +196,7 @@ def evaluate(graph):
                 del _outputs
 
             bar.close()
-            print('result shape:', result)
+            print('result shape:', result.shape)
             print('scores length: ', len(result))  # 2265989
             if cfg.valid:
                 print('computing auc ...')
@@ -232,19 +235,19 @@ def build_arch(feature, hide_layer, summary, is_training):
     with tf.name_scope('arch'):
         if cfg.arch == 1 or cfg.arch == 3:
             if cfg.feature == 1:  # lgb精简特征
-                v = tf.Variable(tf.truncated_normal(shape=[data_input2.LGB_LEN, cfg.embed], stddev=0.01),
+                v = tf.Variable(tf.truncated_normal(shape=[data_input.LGB_LEN, cfg.embed], stddev=0.01),
                                 dtype=tf.float32, name='v')
             else:  # hash特征
-                v = tf.Variable(tf.truncated_normal(shape=[data_input2.HASH_LEN, cfg.embed], stddev=0.01),
+                v = tf.Variable(tf.truncated_normal(shape=[data_input.HASH_LEN, cfg.embed], stddev=0.01),
                                 dtype=tf.float32, name='v')
 
             with tf.variable_scope('FM'):
                 b = tf.get_variable('bias', shape=[1], initializer=tf.zeros_initializer())
                 if cfg.feature == 1:
-                    w = tf.get_variable('w', shape=[data_input2.LGB_LEN, 1],
+                    w = tf.get_variable('w', shape=[data_input.LGB_LEN, 1],
                                         initializer=tf.truncated_normal_initializer(stddev=0.01))
                 else:
-                    w = tf.get_variable('w', shape=[data_input2.HASH_LEN, 1],
+                    w = tf.get_variable('w', shape=[data_input.HASH_LEN, 1],
                                         initializer=tf.truncated_normal_initializer(stddev=0.01))
 
                 linear_terms = tf.sparse_tensor_dense_matmul(feature, w)
@@ -266,12 +269,12 @@ def build_arch(feature, hide_layer, summary, is_training):
                 # embedding layer
                 if cfg.feature == 1:  # lgb精简特征
                     dnn_v = tf.Variable(
-                        tf.truncated_normal(shape=[data_input2.LGB_LEN, cfg.embed], mean=0, stddev=0.01),
+                        tf.truncated_normal(shape=[data_input.LGB_LEN, cfg.embed], mean=0, stddev=0.01),
                         dtype='float32')
                     dnn_input = tf.sparse_tensor_dense_matmul(feature, dnn_v)
                 else:  # hash特征
                     dnn_v = tf.Variable(
-                        tf.truncated_normal(shape=[data_input2.HASH_LEN, cfg.embed], mean=0, stddev=0.01),
+                        tf.truncated_normal(shape=[data_input.HASH_LEN, cfg.embed], mean=0, stddev=0.01),
                         dtype='float32')
                     dnn_input = tf.sparse_tensor_dense_matmul(feature, dnn_v)
 
@@ -280,7 +283,7 @@ def build_arch(feature, hide_layer, summary, is_training):
                     layer = tf.layers.dense(layer, num, activation=None, use_bias=True, name='layer' + str(i+1))
                     layer = tf.layers.batch_normalization(layer, training=is_training, name='bn_layer' + str(i+1))
                     layer = tf.nn.relu(layer, name='act_layer' + str(i+1))
-                    layer = tf.layers.dropout(layer, cfg.drop_out, is_training)
+                    # layer = tf.layers.dropout(layer, cfg.drop_out, is_training)
                     # summary.append(tf.summary.histogram('layer' + str(i+1), layer))
 
                 y_dnn = tf.layers.dense(layer, 1, activation=None, use_bias=True, name='dnn_out')
