@@ -126,6 +126,9 @@ def train(graph):
                             saver.save(sess,
                                        cfg.logdir + '/model.ckpt-%02d-%02d-%05d-%05d' % (e, stage, i, global_step))
                     bar.close()
+                    saver.save(sess,
+                               cfg.logdir + '/model.ckpt-%02d-%02d-%05d-%05d' % (e, stage+1, 0, global_step))
+                    del tr_x, tr_y
                     print()
                     print('stage', stage, 'finished!')
                 saver.save(sess, cfg.logdir + '/model.ckpt-%02d-%02d-%05d-%05d' % (e+1, 4, 0, global_step))
@@ -202,6 +205,10 @@ def evaluate(graph):
                 print('computing auc ...')
                 _, _, auc = utils.cal_auc(y, result)
                 print('auc:', auc)
+                print('saving result to data/output/tr'+str(cfg.fold)+'/deepfm.csv ...')
+                prob = pd.DataFrame({'prob': result.reshape([data_size,])})
+                prob.prob = prob.prob.apply(lambda x: float('%.6f' % x))
+                prob.to_csv('data/output/tr'+str(cfg.fold)+'/deepfm.csv', index=False)
             else:
                 print('reading res.csv ...')
                 if cfg.test_set == 1:
@@ -211,7 +218,7 @@ def evaluate(graph):
                 test_data['score'] = np.array(result)
                 test_data['score'] = test_data['score'].apply(lambda x: float('%.6f' % x))
                 print('writing results into submission.csv ...')
-                test_data[['aid', 'uid', 'score']].to_csv('results/submission.csv', columns=['aid', 'uid', 'score'],
+                test_data[['aid', 'uid', 'score']].to_csv('data/output/tr'+ str(cfg.fold) + '/submission.csv', columns=['aid', 'uid', 'score'],
                                                           index=False)
 
         print('finish')
@@ -262,7 +269,8 @@ def build_arch(feature, hide_layer, summary, is_training):
                                                 tf.reduce_mean(tf.subtract(part1, part2), 1, keep_dims=True), name='interaction')
                 summary.append(tf.summary.histogram('interaction_terms', interaction_terms))
 
-                y_fm = tf.add(linear_terms, interaction_terms, name='fm_out')
+                # y_fm = tf.add(linear_terms, interaction_terms, name='fm_out')
+                y_fm = tf.concat([linear_terms, interaction_terms], axis=1, name='fm_out')
                 summary.append(tf.summary.histogram('fm_outputs', y_fm))
 
         if cfg.arch == 2 or cfg.arch == 3:
@@ -287,7 +295,10 @@ def build_arch(feature, hide_layer, summary, is_training):
                     # layer = tf.layers.dropout(layer, cfg.drop_out, is_training)
                     # summary.append(tf.summary.histogram('layer' + str(i+1), layer))
 
-                y_dnn = tf.layers.dense(layer, 1, activation=None, use_bias=True, name='dnn_out')
+                if cfg.arch == 2:
+                    y_dnn = tf.layers.dense(layer, 1, activation=None, use_bias=True, name='dnn_out')
+                else:
+                    y_dnn = layer
             summary.append(tf.summary.histogram('dnn_outputs', y_dnn))
 
         if cfg.arch == 1:
@@ -295,7 +306,10 @@ def build_arch(feature, hide_layer, summary, is_training):
         elif cfg.arch == 2:
             logits = y_dnn
         else:
-            logits = y_fm + y_dnn
+            # logits = y_fm + y_dnn
+            logits = tf.concat([y_fm, y_dnn], axis=1)
+            logits = tf.layers.batch_normalization(logits, training=is_training)
+            logits = tf.layers.dense(logits, 1, activation=None, use_bias=True, name='logits')
 
         summary.append(tf.summary.histogram('logits', logits))
         outputs = tf.sigmoid(logits, name='final_outputs')
