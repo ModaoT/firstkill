@@ -5,11 +5,153 @@ import pandas as pd
 import tensorflow as tf
 # 进度条工具
 from tqdm import tqdm
-
-import data_input
 import utils
-# 超参配置文件
-from config import cfg
+from scipy import sparse
+
+import feather
+
+
+
+flags = tf.app.flags
+
+
+############################
+#    hyper parameters      #
+############################
+flags.DEFINE_string('mode', 'tv', 'test:仅执行一次操作；all：一个完整的4stack；tv：train+valid')
+
+flags.DEFINE_integer('arch',  3, '网络架构：1，仅fm/ffm；2，cnn；3，deepFM')
+flags.DEFINE_boolean('type', 1, '1,fm，2，ffm')
+flags.DEFINE_float('lr', 0.0001, '设置学习率')
+flags.DEFINE_float('pos_weight', 1, '惩罚FN')
+flags.DEFINE_integer('data_source', 1, '数据源：1，cnt 78维交叉特征+13475；')
+flags.DEFINE_integer('fold', 1, 'k折训练的阶段：1，在234训练，在1验证；2，在134训练，在2验证；3，在124训练，在3验证；4在123训练，在4验证')
+
+# flags.DEFINE_float('drop_out', 0.5, 'drop out比率')
+flags.DEFINE_integer('feature_len', 78, '特征维度')
+flags.DEFINE_integer('batch', 1024, '设置批大小')
+flags.DEFINE_integer('epoch', 2, '设置训练的轮数')
+# flags.DEFINE_integer('checkpoint', 1000, '每隔多少个批次保存一次模型')
+flags.DEFINE_integer('summary', 150, '每隔多少个批次记录一次日志')
+flags.DEFINE_boolean('train', False, '选择是训练还是推理')
+flags.DEFINE_boolean('valid', False, '是否在训练中做交叉验证')  # 在train为False的前提下，valid如果为False，则生成submission，valid为True，在验证集上评估auc
+flags.DEFINE_string('logdir', 'df_cnt_78_13475_', '日志保存路径')
+
+
+
+flags.DEFINE_list('hidden', [256, 128, 64, 32], '设置隐藏层结构')
+# flags.DEFINE_list('cnt_layer', [64, 32, 32], 'cnt神经层')
+# flags.DEFINE_list('hidden', [512,256,128], '设置隐藏层结构')
+flags.DEFINE_integer('embed', 256, '各嵌入层的单元数')
+# flags.DEFINE_list('fm_embed', [512], 'fm部分的隐向量单元数')
+
+p= 888
+f=2
+k=4
+def feature2field(i):
+    if i < 376:
+        return 0
+    elif i >= 376:
+        return 1
+
+
+
+"""
+K_fold交叉验证即：
+1，用234训练，在1上验证（通过改变fold参数，logdir也要改名，以区分不同模型）
+2，用134训练，在2上验证
+3，用124训练，在3上验证
+4，用123训练，在4上验证
+5，4个模型分别在test上预测，取平均值作为test结果
+6，在1234上验证中计算出的结果，可以作为新的训练集的特征，以备后期模型融合
+"""
+
+
+cfg = tf.app.flags.FLAGS
+
+
+if cfg.data_source == 1:
+    DATA = '.npz'
+
+
+def read_data(dir, cls):
+    y_file = None
+    y = None
+    if dir == 'test':
+        directory = 'data/test/'
+    elif dir == 'tr1':
+        directory = 'data/tr1/'
+    elif dir == 'tr2':
+        directory = 'data/tr2/'
+    elif dir == 'tr3':
+        directory = 'data/tr3/'
+    elif dir == 'tr4':
+        directory = 'data/tr4/'
+    else:
+        return None
+
+    if cls == 'tr':
+        # X_file = dir + '_9_2162.npz'
+        X_file = dir + DATA
+        y_file = dir + '_y.csv'
+    elif cls == 'test1':
+        X_file = dir+'1'+ DATA
+    elif cls == 'test2':
+        X_file = dir+'2'+ DATA
+    else:
+        return None
+
+    print('x1:',directory + X_file)
+    X = sparse.load_npz(directory + X_file)
+    if y_file is not None:
+        y = pd.read_csv(directory + y_file).values
+
+    return X, y
+
+
+def get_test_data(test_set):
+    print('reading test data...')
+    print('test set：', test_set)
+    if test_set == 1:
+        test_x, _ = read_data('test', 'test1')
+    elif test_set == 2:
+        test_x, _ = read_data('test', 'test2')
+    else:
+        return None
+    return test_x
+
+
+def get_valid_data(fold):
+    print('reading valid data from fold', fold, '...')
+    if fold == 1:
+        val_x, val_y = read_data('tr1', 'tr')
+    elif fold == 2:
+        val_x, val_y = read_data('tr2', 'tr')
+    elif fold == 3:
+        val_x, val_y = read_data('tr3', 'tr')
+    elif fold == 4:
+        val_x, val_y = read_data('tr4', 'tr')
+    else:
+        return None
+    print('x shape:', val_x.shape)
+    return val_x, val_y, val_y.shape[0]
+
+
+def get_train_data(fold, stage=0):
+    print('reading train data from fold', fold, '...')
+    if fold == 1:
+        tr = ['tr2', 'tr3', 'tr4']
+    elif fold == 2:
+        tr = ['tr1', 'tr3', 'tr4']
+    elif fold == 3:
+        tr = ['tr1', 'tr2', 'tr4']
+    elif fold == 4:
+        tr = ['tr1', 'tr2', 'tr3']
+    else:
+        return None
+    tr_x, tr_y = read_data(tr[stage], 'tr')
+    print('x1 shape:', tr_x.shape)
+    return tr_x, tr_y, tr_y.shape[0]
 
 
 def main(_):
@@ -24,6 +166,7 @@ def main(_):
     elif cfg.mode == 'all':
         for i in range(4):
             # 训练
+            i+=1
             tf.reset_default_graph()
             graph = tf.Graph()
             logdir = cfg.logdir + str(i+1)
@@ -37,13 +180,25 @@ def main(_):
             tf.reset_default_graph()
             graph = tf.Graph()
             evaluate(graph, False, logdir, fold)
+    elif cfg.mode == 'tv':
+        # 训练
+        tf.reset_default_graph()
+        graph = tf.Graph()
+        logdir = cfg.logdir + str(cfg.fold)
+        train(graph, logdir, cfg.fold, cfg.epoch)
+        # 验证
+        tf.reset_default_graph()
+        graph = tf.Graph()
+        evaluate(graph, True, logdir, cfg.fold)
 
 
 def build_graph(train, hidden):
+    print('build graph...')
     with tf.name_scope('Input'):
         indices_i = tf.placeholder(dtype=tf.int64, shape=[None, 2])
         values_i = tf.placeholder(dtype=tf.float32, shape=[None])
         dense_shape_i = tf.placeholder(dtype=tf.int64, shape=[2])
+        ctr_i = tf.placeholder(dtype=tf.float32, shape=[None, cfg.feature_len])
         feature = tf.SparseTensor(indices=indices_i, values=values_i, dense_shape=dense_shape_i)
 
         if train:
@@ -52,7 +207,7 @@ def build_graph(train, hidden):
 
     # 构造网络结构
     summary = []
-    logits, outputs = build_arch(feature, hidden, summary, is_train if train else False)
+    logits, outputs = build_arch(feature, ctr_i, hidden, summary, is_train if train else False)
 
     if train:
         # 构造损失函数
@@ -66,9 +221,9 @@ def build_graph(train, hidden):
     init_op = tf.group([tf.global_variables_initializer(), tf.local_variables_initializer()])
     saver = tf.train.Saver(max_to_keep=5)
     if train:
-        return indices_i, values_i, dense_shape_i, labels, is_train, loss, outputs, merged_summary, opt, init_op, saver
+        return indices_i, values_i, dense_shape_i, ctr_i, labels, is_train, loss, outputs, merged_summary, opt, init_op, saver
     else:
-        return indices_i, values_i, dense_shape_i, init_op, saver, outputs
+        return indices_i, values_i, dense_shape_i, ctr_i, init_op, saver, outputs
 
 
 def train(graph, logdir, fold, epoch):
@@ -76,7 +231,7 @@ def train(graph, logdir, fold, epoch):
     ckpt, last_epoch, last_stage, local_step, global_step = get_last_state(logdir)
 
     with graph.as_default():
-        indices_i, values_i, dense_shape_i, labels, is_train, loss, outputs, merged_summary, opt, init_op, saver = build_graph(True, cfg.hidden)
+        indices_i, values_i, dense_shape_i, ctr_i, labels, is_train, loss, outputs, merged_summary, opt, init_op, saver = build_graph(True, cfg.hidden)
         with tf.Session() as sess:
             sess.run(init_op)
             train_writer = tf.summary.FileWriter(logdir + '/train', sess.graph)
@@ -93,11 +248,12 @@ def train(graph, logdir, fold, epoch):
 
             for e in range(last_epoch, epoch):
                 print('Training for epoch ' + str(e + 1) + '/' + str(epoch) + ':')
-                val_x, val_y, val_size = data_input.get_valid_data(fold)
+                if cfg.valid:
+                    val_x, val_y, val_size = get_valid_data(fold)
                 for stage in range(last_stage, 3):
                     print()
                     print('stage', stage, ':')
-                    tr_x, tr_y, tr_size = data_input.get_train_data(fold, stage)
+                    tr_x, tr_y, tr_size = get_train_data(fold, stage)
                     train_batch = tr_size // cfg.batch
                     bar = tqdm(range(local_step, train_batch+1), initial=last_epoch, total=train_batch, ncols=150, leave=False,
                                unit='b')
@@ -125,23 +281,25 @@ def train(graph, logdir, fold, epoch):
                                            labels: tr_y_batch,
                                            is_train: False})
                             train_writer.add_summary(summary_str, global_step)
-                            if val_idx + cfg.batch >= val_size:
-                                val_idx = 0
-                            val_x_batch = val_x[val_idx: val_idx + cfg.batch].tocoo()
-                            val_y_batch = val_y[val_idx: val_idx + cfg.batch]
-                            val_idx += cfg.batch
-                            val_indics = np.mat([val_x_batch.row, val_x_batch.col]).transpose()
-                            val_values = val_x_batch.data
-                            val_dense_shapes = val_x_batch.shape
-                            val_loss, val_pre, summary_str = sess.run(
-                                [loss, outputs, merged_summary],
-                                feed_dict={indices_i: val_indics,
-                                           values_i: val_values,
-                                           dense_shape_i: val_dense_shapes,
-                                           labels: val_y_batch,
-                                           is_train: False})
-                            valid_writer.add_summary(summary_str, global_step)
-                            bar.set_description('t_l:{:5.3f},v_l:{:5.3f}'.format(tr_loss, val_loss))
+                            bar.set_description('t_l:{:5.3f}'.format(tr_loss))
+                            if cfg.valid:
+                                if val_idx + cfg.batch >= val_size:
+                                    val_idx = 0
+                                val_x_batch = val_x[val_idx: val_idx + cfg.batch].tocoo()
+                                val_y_batch = val_y[val_idx: val_idx + cfg.batch]
+                                val_idx += cfg.batch
+                                val_indics = np.mat([val_x_batch.row, val_x_batch.col]).transpose()
+                                val_values = val_x_batch.data
+                                val_dense_shapes = val_x_batch.shape
+                                val_loss, val_pre, summary_str = sess.run(
+                                    [loss, outputs, merged_summary],
+                                    feed_dict={indices_i: val_indics,
+                                               values_i: val_values,
+                                               dense_shape_i: val_dense_shapes,
+                                               labels: val_y_batch,
+                                               is_train: False})
+                                valid_writer.add_summary(summary_str, global_step)
+                                bar.set_description('t_l:{:5.3f},v_l:{:5.3f}'.format(tr_loss, val_loss))
                         else:
                             sess.run(opt, feed_dict={indices_i: tr_indics,
                                                      values_i: tr_values,
@@ -149,16 +307,17 @@ def train(graph, logdir, fold, epoch):
                                                      labels: tr_y_batch,
                                                      is_train: True})
                         global_step += 1
-                        if global_step % cfg.checkpoint == 0:
-                            saver.save(sess,
-                                       logdir + '/model.ckpt-%02d-%02d-%05d-%05d' % (e, stage, i, global_step))
+                        # if global_step % cfg.checkpoint == 0:
+                        #     saver.save(sess,
+                        #                logdir + '/model.ckpt-%02d-%02d-%05d-%05d' % (e, stage, i, global_step))
                     bar.close()
                     saver.save(sess,
                                logdir + '/model.ckpt-%02d-%02d-%05d-%05d' % (e, stage+1, 0, global_step))
                     del tr_x, tr_y
                     print()
                     print('stage', stage, 'finished!')
-                del val_x, val_y
+                if cfg.valid:
+                    del val_x, val_y
                 saver.save(sess, logdir + '/model.ckpt-%02d-%02d-%05d-%05d' % (e+1, 0, 0, global_step))
             train_writer.close()
             valid_writer.close()
@@ -171,25 +330,26 @@ def evaluate(graph, valid, logdir, fold):
         print('No ckpt found!')
         return
 
-    if valid:
-        # 读取数据
-        X_valid, y, data_size_valid = data_input.get_valid_data(fold)
+    if valid:        # 读取数据
+        X1_valid, X2_valid, y, data_size_valid = get_valid_data(fold)
         batch_num_valid = data_size_valid // cfg.batch
 
         result_valid = np.zeros([data_size_valid, 1])
 
     else:  # 使用测试集生成submission
         # 读取数据
-        X_test1, data_size_test1 = data_input.get_test_data(1)
-        X_test2, data_size_test2 = data_input.get_test_data(2)
-        batch_num_test1 = data_size_test1 // cfg.batch
+        # data_size_test1 = 11729073
+        data_size_test2 = 11727304
+        # X1_test1, X2_test1 = get_test_data(1)
+        X_test2 = get_test_data(2)
+        # batch_num_test1 = data_size_test1 // cfg.batch
         batch_num_test2 = data_size_test2 // cfg.batch
 
-        result_test1 = np.zeros([data_size_test1, 1])
+        # result_test1 = np.zeros([data_size_test1, 1])
         result_test2 = np.zeros([data_size_test2, 1])
 
     with graph.as_default():
-        indices_i, values_i, dense_shape_i, init_op, saver, outputs = build_graph(False, cfg.hidden)
+        indices_i, values_i, dense_shape_i, ctr_i, init_op, saver, outputs = build_graph(False, cfg.hidden)
         with tf.Session() as sess:
             sess.run(init_op)
             print('load model: ', ckpt.model_checkpoint_path)
@@ -197,8 +357,8 @@ def evaluate(graph, valid, logdir, fold):
             print()
             if valid:
                 print('computing valid result ...')
-                result_valid = predict(sess, batch_num_valid, result_valid, data_size_valid, X_valid, outputs,
-                                       indices_i, values_i, dense_shape_i)
+                result_valid = predict(sess, batch_num_valid, result_valid, data_size_valid, (X1_valid, X2_valid), outputs,
+                                       indices_i, values_i, dense_shape_i, ctr_i)
                 print()
                 print('result_valid shape:', result_valid.shape)
                 print('computing auc ...')
@@ -209,25 +369,28 @@ def evaluate(graph, valid, logdir, fold):
                 prob.prob = prob.prob.apply(lambda x: float('%.6f' % x))
                 prob.to_csv('{}/tr{}_predict_{:.6f}.csv'.format(logdir, fold, auc), index=False)
             else:
-                print('computing test result1 ...')
-                result_test1 = predict(sess, batch_num_test1, result_test1, data_size_test1, X_test1, outputs,
-                                       indices_i, values_i, dense_shape_i)
-                print()
-                print('result_test1 shape:', result_test1.shape)
+                # print('computing test result1 ...')
+                # result_test1 = predict(sess, batch_num_test1, result_test1, data_size_test1, (X1_test1, X2_test1), outputs,
+                #                        indices_i, values_i, dense_shape_i, ctr_i)
+                # print()
+                # print('result_test1 shape:', result_test1.shape)
+                # del X1_test1, X2_test1
                 print('computing test result2 ...')
                 result_test2 = predict(sess, batch_num_test2, result_test2, data_size_test2, X_test2, outputs,
-                                       indices_i, values_i, dense_shape_i)
+                                       indices_i, values_i, dense_shape_i, ctr_i)
                 print()
                 print('result_test2 shape:', result_test2.shape)
 
-                print('reading res1.csv ...')
-                test_data1 = pd.read_csv('data/test/res1.csv')
-                test_data1['score'] = np.array(result_test1)
-                test_data1['score'] = test_data1['score'].apply(lambda x: float('%.6f' % x))
-                print('writing results into {}/test1_predict{}.csv'.format(logdir, fold))
-                test_data1[['aid', 'uid', 'score']].to_csv('{}/test1_predict{}.csv'.format(logdir, fold),
-                                                           columns=['aid', 'uid', 'score'],
-                                                           index=False)
+                del X_test2
+                # print('reading res1.csv ...')
+                # test_data1 = pd.read_csv('data/test/res1.csv')
+                # test_data1['score'] = np.array(result_test1)
+                # test_data1['score'] = test_data1['score'].apply(lambda x: float('%.6f' % x))
+                # print('writing results into {}/test1_predict{}.csv'.format(logdir, fold))
+                # test_data1[['aid', 'uid', 'score']].to_csv('{}/test1_predict{}.csv'.format(logdir, fold),
+                #                                            columns=['aid', 'uid', 'score'],
+                #                                            index=False)
+
 
                 print('reading res2.csv ...')
                 test_data2 = pd.read_csv('data/test/res2.csv')
@@ -241,7 +404,7 @@ def evaluate(graph, valid, logdir, fold):
         print('finish')
 
 
-def predict(sess, batch_num, result, data_size, X, outputs, indices_i, values_i, dense_shape_i):
+def predict(sess, batch_num, result, data_size, X, outputs, indices_i, values_i, dense_shape_i, ctr_i):
     bar = tqdm(range(0, batch_num + 1), total=batch_num, ncols=100, leave=False,
                 unit='b')
     test_idx = 0
@@ -283,40 +446,42 @@ def get_auc_saver(path):
     return fd_train_auc
 
 
-def build_arch(feature, hide_layer, summary, is_training):
+def build_arch(feature, ctr_feature, hide_layer, summary, is_training):
+    print('build arch...')
     with tf.name_scope('arch'):
-        if cfg.arch == 1 or cfg.arch == 3:
-            v = tf.Variable(tf.truncated_normal(shape=[data_input.LGB_LEN, cfg.embed], stddev=0.01),
-                            dtype=tf.float32, name='v')
-
-            with tf.variable_scope('FM'):
-                b = tf.get_variable('bias', shape=[1], initializer=tf.zeros_initializer())
-                w = tf.get_variable('w', shape=[data_input.LGB_LEN, 1],
-                                    initializer=tf.truncated_normal_initializer(stddev=0.01))
-
-                linear_terms = tf.sparse_tensor_dense_matmul(feature, w)
-                linear_terms = tf.add(linear_terms, b, name='linear')
-                summary.append(tf.summary.histogram('linear_terms', linear_terms))
-
-                part1 = tf.square(tf.sparse_tensor_dense_matmul(feature, v))
-                part2 = tf.sparse_tensor_dense_matmul(tf.square(feature), tf.square(v))
-
-                interaction_terms = tf.multiply(0.5,
-                                                tf.reduce_mean(tf.subtract(part1, part2), 1, keepdims=True), name='interaction')
-                summary.append(tf.summary.histogram('interaction_terms', interaction_terms))
-
-                # y_fm = tf.add(linear_terms, interaction_terms, name='fm_out')
-                y_fm = tf.concat([linear_terms, interaction_terms], axis=1, name='fm_out')
-                summary.append(tf.summary.histogram('fm_outputs', y_fm))
+        with tf.variable_scope('FFM'):
+            feature = tf.sparse_tensor_to_dense(feature)
+            with tf.variable_scope('linear_layer'):
+                b = tf.get_variable('bias', shape=[1],
+                                    initializer=tf.zeros_initializer())
+                w1 = tf.get_variable('w1', shape=[p, 1],
+                                     initializer=tf.truncated_normal_initializer(mean=0, stddev=1e-2))
+                # shape of [None, 2]
+                linear_terms = tf.add(tf.matmul(feature, w1), b)
+            with tf.variable_scope('field_aware_interaction_layer'):
+                v = tf.get_variable('v', shape=[p, f, k], dtype='float32',
+                                    initializer=tf.truncated_normal_initializer(mean=0, stddev=0.01))
+                # shape of [None, 1]
+                field_aware_interaction_terms = tf.constant(0, dtype='float32')
+                # build dict to find f, key of feature,value of field
+                for i in range(p):
+                    for j in range(i + 1, p):
+                        field_aware_interaction_terms += tf.multiply(
+                            tf.reduce_sum(tf.multiply(v[i, feature2field(i)], v[j, feature2field(j)])),
+                            tf.multiply(feature[:, i], feature[:, j])
+                        )
+            # shape of [None, 2]
+            y_ffm = tf.add(linear_terms, field_aware_interaction_terms)
 
         if cfg.arch == 2 or cfg.arch == 3:
             with tf.variable_scope('DNN', reuse=False):
                 # embedding layer
                 dnn_v = tf.Variable(
-                    tf.truncated_normal(shape=[data_input.LGB_LEN, cfg.embed], mean=0, stddev=0.01),
+                    tf.truncated_normal(shape=[p, cfg.embed], mean=0, stddev=0.01),
                     dtype='float32')
                 dnn_input = tf.sparse_tensor_dense_matmul(feature, dnn_v)
 
+                # layer = tf.concat([dnn_input, ctr_feature], 1)
                 layer = dnn_input
                 for i, num in enumerate(hide_layer):
                     layer = tf.layers.dense(layer, num, activation=None, use_bias=True, name='layer' + str(i+1))
@@ -332,12 +497,12 @@ def build_arch(feature, hide_layer, summary, is_training):
             summary.append(tf.summary.histogram('dnn_outputs', y_dnn))
 
         if cfg.arch == 1:
-            logits = y_fm
+            logits = y_ffm
         elif cfg.arch == 2:
             logits = y_dnn
         else:
             # logits = y_fm + y_dnn
-            logits = tf.concat([y_fm, y_dnn], axis=1)
+            logits = tf.concat([y_ffm, y_dnn], axis=1)
             logits = tf.layers.batch_normalization(logits, training=is_training)
             logits = tf.layers.dense(logits, 1, activation=None, use_bias=True, name='logits')
 

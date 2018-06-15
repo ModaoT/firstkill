@@ -6,13 +6,14 @@ import tensorflow as tf
 # 进度条工具
 from tqdm import tqdm
 
-import data_input
+import data_input_conv as data_input
 import utils
 # 超参配置文件
-from config import cfg
+from config_conv import cfg
 
 
 def main(_):
+    print('This is run3_conv!')
     if cfg.mode == 'test':
         tf.reset_default_graph()
         graph = tf.Graph()
@@ -37,9 +38,19 @@ def main(_):
             tf.reset_default_graph()
             graph = tf.Graph()
             evaluate(graph, False, logdir, fold)
+    elif cfg.mode == 'tv':
+        # 训练
+        tf.reset_default_graph()
+        graph = tf.Graph()
+        logdir = cfg.logdir + str(cfg.fold)
+        train(graph, logdir, cfg.fold, cfg.epoch)
+        # 验证
+        tf.reset_default_graph()
+        graph = tf.Graph()
+        evaluate(graph, True, logdir, cfg.fold)
 
 
-def build_graph(train, hidden):
+def build_graph(train, filters):
     with tf.name_scope('Input'):
         indices_i = tf.placeholder(dtype=tf.int64, shape=[None, 2])
         values_i = tf.placeholder(dtype=tf.float32, shape=[None])
@@ -52,7 +63,7 @@ def build_graph(train, hidden):
 
     # 构造网络结构
     summary = []
-    logits, outputs = build_arch(feature, hidden, summary, is_train if train else False)
+    logits, outputs = build_arch(feature, filters, summary, is_train if train else False)
 
     if train:
         # 构造损失函数
@@ -76,7 +87,7 @@ def train(graph, logdir, fold, epoch):
     ckpt, last_epoch, last_stage, local_step, global_step = get_last_state(logdir)
 
     with graph.as_default():
-        indices_i, values_i, dense_shape_i, labels, is_train, loss, outputs, merged_summary, opt, init_op, saver = build_graph(True, cfg.hidden)
+        indices_i, values_i, dense_shape_i, labels, is_train, loss, outputs, merged_summary, opt, init_op, saver = build_graph(True, cfg.filters)
         with tf.Session() as sess:
             sess.run(init_op)
             train_writer = tf.summary.FileWriter(logdir + '/train', sess.graph)
@@ -93,7 +104,8 @@ def train(graph, logdir, fold, epoch):
 
             for e in range(last_epoch, epoch):
                 print('Training for epoch ' + str(e + 1) + '/' + str(epoch) + ':')
-                val_x, val_y, val_size = data_input.get_valid_data(fold)
+                if cfg.valid:
+                    val_x, val_y, val_size = data_input.get_valid_data(fold)
                 for stage in range(last_stage, 3):
                     print()
                     print('stage', stage, ':')
@@ -125,23 +137,25 @@ def train(graph, logdir, fold, epoch):
                                            labels: tr_y_batch,
                                            is_train: False})
                             train_writer.add_summary(summary_str, global_step)
-                            if val_idx + cfg.batch >= val_size:
-                                val_idx = 0
-                            val_x_batch = val_x[val_idx: val_idx + cfg.batch].tocoo()
-                            val_y_batch = val_y[val_idx: val_idx + cfg.batch]
-                            val_idx += cfg.batch
-                            val_indics = np.mat([val_x_batch.row, val_x_batch.col]).transpose()
-                            val_values = val_x_batch.data
-                            val_dense_shapes = val_x_batch.shape
-                            val_loss, val_pre, summary_str = sess.run(
-                                [loss, outputs, merged_summary],
-                                feed_dict={indices_i: val_indics,
-                                           values_i: val_values,
-                                           dense_shape_i: val_dense_shapes,
-                                           labels: val_y_batch,
-                                           is_train: False})
-                            valid_writer.add_summary(summary_str, global_step)
-                            bar.set_description('t_l:{:5.3f},v_l:{:5.3f}'.format(tr_loss, val_loss))
+                            bar.set_description('t_l:{:5.3f}'.format(tr_loss))
+                            if cfg.valid:
+                                if val_idx + cfg.batch >= val_size:
+                                    val_idx = 0
+                                val_x_batch = val_x[val_idx: val_idx + cfg.batch].tocoo()
+                                val_y_batch = val_y[val_idx: val_idx + cfg.batch]
+                                val_idx += cfg.batch
+                                val_indics = np.mat([val_x_batch.row, val_x_batch.col]).transpose()
+                                val_values = val_x_batch.data
+                                val_dense_shapes = val_x_batch.shape
+                                val_loss, val_pre, summary_str = sess.run(
+                                    [loss, outputs, merged_summary],
+                                    feed_dict={indices_i: val_indics,
+                                               values_i: val_values,
+                                               dense_shape_i: val_dense_shapes,
+                                               labels: val_y_batch,
+                                               is_train: False})
+                                valid_writer.add_summary(summary_str, global_step)
+                                bar.set_description('t_l:{:5.3f},v_l:{:5.3f}'.format(tr_loss, val_loss))
                         else:
                             sess.run(opt, feed_dict={indices_i: tr_indics,
                                                      values_i: tr_values,
@@ -158,7 +172,8 @@ def train(graph, logdir, fold, epoch):
                     del tr_x, tr_y
                     print()
                     print('stage', stage, 'finished!')
-                del val_x, val_y
+                if cfg.valid:
+                    del val_x, val_y
                 saver.save(sess, logdir + '/model.ckpt-%02d-%02d-%05d-%05d' % (e+1, 0, 0, global_step))
             train_writer.close()
             valid_writer.close()
@@ -189,7 +204,7 @@ def evaluate(graph, valid, logdir, fold):
         result_test2 = np.zeros([data_size_test2, 1])
 
     with graph.as_default():
-        indices_i, values_i, dense_shape_i, init_op, saver, outputs = build_graph(False, cfg.hidden)
+        indices_i, values_i, dense_shape_i, init_op, saver, outputs = build_graph(False, cfg.filters)
         with tf.Session() as sess:
             sess.run(init_op)
             print('load model: ', ckpt.model_checkpoint_path)
@@ -283,30 +298,30 @@ def get_auc_saver(path):
     return fd_train_auc
 
 
-def build_arch(feature, hide_layer, summary, is_training):
+def build_arch(feature, filters, summary, is_training):
     with tf.name_scope('arch'):
         if cfg.arch == 1 or cfg.arch == 3:
-            v = tf.Variable(tf.truncated_normal(shape=[data_input.LGB_LEN, cfg.embed], stddev=0.01),
-                            dtype=tf.float32, name='v')
-
+            fm_input_len = data_input.LGB_LEN
+            fm_input = feature
             with tf.variable_scope('FM'):
-                b = tf.get_variable('bias', shape=[1], initializer=tf.zeros_initializer())
-                w = tf.get_variable('w', shape=[data_input.LGB_LEN, 1],
-                                    initializer=tf.truncated_normal_initializer(stddev=0.01))
+                for i in range(len(cfg.fm_embed)):
+                    fm_layer_num = i+1
+                    v = tf.Variable(tf.truncated_normal(shape=[fm_input_len, cfg.fm_embed[i]], stddev=0.01),
+                                    dtype=tf.float32, name='v{}'.format(fm_layer_num))
+                    if i == 0:
+                        part1 = tf.square(tf.sparse_tensor_dense_matmul(fm_input, v))
+                        part2 = tf.sparse_tensor_dense_matmul(tf.square(fm_input), tf.square(v))
+                    else:
+                        part1 = tf.square(tf.matmul(fm_input, v))
+                        part2 = tf.matmul(tf.square(fm_input), tf.square(v))
 
-                linear_terms = tf.sparse_tensor_dense_matmul(feature, w)
-                linear_terms = tf.add(linear_terms, b, name='linear')
-                summary.append(tf.summary.histogram('linear_terms', linear_terms))
+                    interaction_terms = tf.multiply(0.5, tf.subtract(part1, part2), name='interaction{}'.format(fm_layer_num))
+                    summary.append(tf.summary.histogram('interaction_terms{}'.format(fm_layer_num), interaction_terms))
 
-                part1 = tf.square(tf.sparse_tensor_dense_matmul(feature, v))
-                part2 = tf.sparse_tensor_dense_matmul(tf.square(feature), tf.square(v))
+                    fm_input_len = cfg.fm_embed[i]
+                    fm_input = tf.layers.batch_normalization(interaction_terms, training=is_training, name='fm_bn_layer{}'.format(fm_layer_num))
 
-                interaction_terms = tf.multiply(0.5,
-                                                tf.reduce_mean(tf.subtract(part1, part2), 1, keepdims=True), name='interaction')
-                summary.append(tf.summary.histogram('interaction_terms', interaction_terms))
-
-                # y_fm = tf.add(linear_terms, interaction_terms, name='fm_out')
-                y_fm = tf.concat([linear_terms, interaction_terms], axis=1, name='fm_out')
+                y_fm = tf.layers.dense(interaction_terms, 1, activation=None, use_bias=True)
                 summary.append(tf.summary.histogram('fm_outputs', y_fm))
 
         if cfg.arch == 2 or cfg.arch == 3:
@@ -317,18 +332,15 @@ def build_arch(feature, hide_layer, summary, is_training):
                     dtype='float32')
                 dnn_input = tf.sparse_tensor_dense_matmul(feature, dnn_v)
 
-                layer = dnn_input
-                for i, num in enumerate(hide_layer):
-                    layer = tf.layers.dense(layer, num, activation=None, use_bias=True, name='layer' + str(i+1))
+                layer = tf.expand_dims(dnn_input, -1)
+                for i, num in enumerate(filters):
+                    layer = tf.layers.conv1d(layer, num, cfg.kernel, cfg.stride, name='conv_layer{}'.format(str(i+1)))
                     layer = tf.layers.batch_normalization(layer, training=is_training, name='bn_layer' + str(i+1))
                     layer = tf.nn.relu(layer, name='act_layer' + str(i+1))
+                    # layer = tf.layers.max_pooling1d(layer, cfg.pool_size, cfg.stride)
                     # layer = tf.layers.dropout(layer, cfg.drop_out, is_training)
                     # summary.append(tf.summary.histogram('layer' + str(i+1), layer))
-
-                if cfg.arch == 2:
-                    y_dnn = tf.layers.dense(layer, 1, activation=None, use_bias=True, name='dnn_out')
-                else:
-                    y_dnn = layer
+                y_dnn = tf.layers.dense(tf.layers.flatten(layer), 1, activation=None, use_bias=True)
             summary.append(tf.summary.histogram('dnn_outputs', y_dnn))
 
         if cfg.arch == 1:
@@ -336,10 +348,9 @@ def build_arch(feature, hide_layer, summary, is_training):
         elif cfg.arch == 2:
             logits = y_dnn
         else:
-            # logits = y_fm + y_dnn
-            logits = tf.concat([y_fm, y_dnn], axis=1)
-            logits = tf.layers.batch_normalization(logits, training=is_training)
-            logits = tf.layers.dense(logits, 1, activation=None, use_bias=True, name='logits')
+            logits = y_fm + y_dnn
+            # logits = tf.concat([y_fm, y_dnn], axis=1)
+            # logits = tf.layers.dense(logits, 1, activation=None, use_bias=True, name='logits')
 
         summary.append(tf.summary.histogram('logits', logits))
         outputs = tf.sigmoid(logits, name='final_outputs')

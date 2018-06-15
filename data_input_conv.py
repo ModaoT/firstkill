@@ -2,7 +2,7 @@ import tensorflow as tf
 import pandas as pd
 import numpy as np
 # 超参配置文件
-from config import cfg
+from config_conv import cfg
 from scipy import sparse
 
 
@@ -23,11 +23,26 @@ elif cfg.data_source == 5:
     DATA = '_1_13475.npz'
     LGB_LEN = 13475
 elif cfg.data_source == 6:
-    DATA = '_2_9098_ctr.npz'
-    LGB_LEN = 9098
+    DATA = '_dart_1_11494.npz'
+    LGB_LEN = 11494
 elif cfg.data_source == 7:
-    DATA = '_1_13475_ctr.npz'
-    LGB_LEN = 13475
+    DATA = '_dart_2_7936.npz'
+    LGB_LEN = 7936
+elif cfg.data_source == 8:
+    DATA = '_dart_3_6153.npz'
+    LGB_LEN = 6153
+elif cfg.data_source == 9:
+    DATA = '_dart_5_4116.npz'
+    LGB_LEN = 4116
+elif cfg.data_source == 10:
+    DATA = '_dart_7_3032.npz'
+    LGB_LEN = 3032
+elif cfg.data_source == 11:
+    DATA = '_dart_9_2401.npz'
+    LGB_LEN = 2401
+elif cfg.data_source == 12:
+    DATA = '_dart_11_1914.npz'
+    LGB_LEN = 1914
 
 
 def read_data(dir, cls):
